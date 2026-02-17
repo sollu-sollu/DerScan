@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { theme } from '../theme';
+import { useTheme } from '../theme';
 
 interface ChecklistItemProps {
   title: string;
@@ -21,36 +21,51 @@ export function ChecklistItem({
   checked,
   onToggle,
   icon,
-  iconColor = theme.colors.primary,
+  iconColor,
   style,
 }: ChecklistItemProps) {
+  const { colors } = useTheme();
+  const activeIconColor = iconColor || colors.primary;
+
   return (
     <TouchableOpacity
-      style={[styles.container, style]}
+      style={[styles.container, { borderBottomColor: colors.border }, style]}
       onPress={onToggle}
       activeOpacity={0.7}
     >
       <View style={styles.leftSection}>
         {icon && (
-          <View style={[styles.iconBg, { backgroundColor: `${iconColor}15` }]}>
-            <Icon name={icon} size={20} color={iconColor} />
+          <View style={[styles.iconBg, { backgroundColor: `${activeIconColor}15` }]}>
+            <Icon name={icon} size={20} color={activeIconColor} />
           </View>
         )}
         <View style={styles.textContainer}>
-          <Text style={[styles.title, checked && styles.checkedTitle]}>
+          <Text style={[
+            styles.title, 
+            { color: colors.text },
+            checked && { color: colors.textLight, textDecorationLine: 'line-through' }
+          ]}>
             {title}
           </Text>
           {subtitle && (
-            <Text style={[styles.subtitle, checked && styles.checkedSubtitle]}>
+            <Text style={[
+              styles.subtitle, 
+              { color: colors.textLight },
+              checked && { textDecorationLine: 'line-through' }
+            ]}>
               {subtitle}
             </Text>
           )}
         </View>
       </View>
       <View style={styles.rightSection}>
-        {time && <Text style={styles.time}>{time}</Text>}
-        <View style={[styles.checkbox, checked && styles.checkedBox]}>
-          {checked && <Icon name="check" size={14} color={theme.colors.white} />}
+        {time && <Text style={[styles.time, { color: colors.textLight }]}>{time}</Text>}
+        <View style={[
+          styles.checkbox, 
+          { borderColor: colors.secondary },
+          checked && { backgroundColor: colors.success, borderColor: colors.success }
+        ]}>
+          {checked && <Icon name="check" size={14} color={colors.white} />}
         </View>
       </View>
     </TouchableOpacity>
@@ -65,7 +80,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 4,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
   leftSection: {
     flexDirection: 'row',
@@ -86,19 +100,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 15,
     fontWeight: '500',
-    color: theme.colors.text,
-  },
-  checkedTitle: {
-    textDecorationLine: 'line-through',
-    color: theme.colors.textLight,
   },
   subtitle: {
     fontSize: 12,
-    color: theme.colors.textLight,
     marginTop: 2,
-  },
-  checkedSubtitle: {
-    textDecorationLine: 'line-through',
   },
   rightSection: {
     flexDirection: 'row',
@@ -107,20 +112,14 @@ const styles = StyleSheet.create({
   },
   time: {
     fontSize: 12,
-    color: theme.colors.textLight,
   },
   checkbox: {
     width: 24,
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: theme.colors.secondary,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  checkedBox: {
-    backgroundColor: theme.colors.success,
-    borderColor: theme.colors.success,
   },
 });
 

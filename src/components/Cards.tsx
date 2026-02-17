@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, ViewStyle } from 'react-native';
-import { theme } from '../theme';
+import { useTheme } from '../theme';
 
 interface InfoCardProps {
   children: React.ReactNode;
@@ -8,7 +8,18 @@ interface InfoCardProps {
 }
 
 export function InfoCard({ children, style }: InfoCardProps) {
-  return <View style={[styles.infoCard, style]}>{children}</View>;
+  const { colors, borderRadius, spacing, shadows } = useTheme();
+  
+  return (
+    <View style={[
+      styles.infoCard, 
+      { backgroundColor: colors.cardBackground, borderRadius: borderRadius.lg, padding: spacing.lg },
+      shadows.md,
+      style
+    ]}>
+      {children}
+    </View>
+  );
 }
 
 interface StatCardProps {
@@ -20,48 +31,47 @@ interface StatCardProps {
 }
 
 export function StatCard({ icon, value, label, color, style }: StatCardProps) {
+  const { colors, borderRadius, spacing, shadows } = useTheme();
+  
   return (
-    <View style={[styles.statCard, style]}>
-      <View style={[styles.statIconContainer, color ? { backgroundColor: `${color}20` } : {}]}>
+    <View style={[
+      styles.statCard, 
+      { backgroundColor: colors.cardBackground, borderRadius: borderRadius.md, padding: spacing.md },
+      shadows.sm,
+      style
+    ]}>
+      <View style={[
+        styles.statIconContainer, 
+        { backgroundColor: colors.background, marginBottom: spacing.sm },
+        color ? { backgroundColor: `${color}20` } : {}
+      ]}>
         {icon}
       </View>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={[styles.statValue, { color: colors.text }]}>{value}</Text>
+      <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{label}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   infoCard: {
-    backgroundColor: theme.colors.white,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.lg,
-    ...theme.shadows.md,
   },
   statCard: {
-    backgroundColor: theme.colors.white,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.md,
     alignItems: 'center',
-    ...theme.shadows.sm,
   },
   statIconContainer: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: theme.colors.background,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: theme.spacing.sm,
   },
   statValue: {
     fontSize: 20,
     fontWeight: '700',
-    color: theme.colors.text,
   },
   statLabel: {
     fontSize: 12,
-    color: theme.colors.textSecondary,
     marginTop: 2,
     textAlign: 'center',
   },

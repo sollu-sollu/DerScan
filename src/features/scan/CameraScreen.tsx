@@ -5,53 +5,350 @@ import {
   StyleSheet,
   TouchableOpacity,
   Dimensions,
-  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { launchImageLibrary } from 'react-native-image-picker';
+import { 
+  Camera, 
+  useCameraDevice, 
+  useCameraPermission,
+  PhotoFile
+} from 'react-native-vision-camera';
 
-import { theme } from '../../theme';
+import { useTheme } from '../../theme';
 import { RootStackParamList } from '../../navigation/AppNavigator';
+import { analyzeSkinImage, AnalysisResult } from '../../services/api';
+import { saveScanResult } from '../../services/firestore';
+
+type CameraRouteProp = RouteProp<RootStackParamList, 'Camera'>;
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 export default function CameraScreen() {
   const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<CameraRouteProp>();
+  const { colors, isDarkMode } = useTheme();
+  
+  // Camera State
+  const device = useCameraDevice('back');
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const camera = React.useRef<Camera>(null);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [statusText, setStatusText] = useState('Align & Hold Steady...');
 
-  // Simulate camera capture and processing
-  const handleCapture = () => {
+  // Effect to Check/Request Permission
+  useEffect(() => {
+    if (!hasPermission) {
+      requestPermission();
+    }
+  }, [hasPermission]);
+
+  // Effect to handle image from gallery (passed via route)
+  useEffect(() => {
+    if (route.params?.selectedImage && !isProcessing) {
+      const uri = route.params.selectedImage;
+      // Clear the param immediately so it doesn't re-trigger on re-focus
+      navigation.setParams({ selectedImage: undefined });
+      handleAnalysis(uri);
+    }
+  }, [route.params?.selectedImage]);
+
+  const handleGalleryPicker = async () => {
+    try {
+      const result = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.8,
+      });
+
+      if (result.didCancel) return;
+      
+      if (result.errorCode) {
+        Alert.alert('Error', result.errorMessage || 'Failed to open gallery');
+        return;
+      }
+
+      if (result.assets && result.assets.length > 0 && result.assets[0].uri) {
+        handleAnalysis(result.assets[0].uri);
+      }
+    } catch (err: any) {
+      Alert.alert('Error', `Unexpected Error (Picker): ${err.message || 'Unknown'}`);
+    }
+  };
+
+  const handleCapture = async () => {
+    if (!camera.current || isProcessing) return;
+    
+    try {
+      setIsProcessing(true);
+      setStatusText('Capturing...');
+      
+      // We don't change isActive yet to ensure camera is ready
+      const photo: PhotoFile = await camera.current.takePhoto({
+        flash: 'auto',
+        enableShutterSound: true,
+      });
+      
+      const uri = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
+      handleAnalysis(uri);
+    } catch (e: any) {
+      setIsProcessing(false);
+      setStatusText('Align & Hold Steady...');
+      Alert.alert('Capture Error', e.message || 'Failed to capture photo');
+    }
+  };
+
+  const handleAnalysis = async (uri: string) => {
     setIsProcessing(true);
     setProgress(0);
+    setStatusText('Analyzing skin condition...');
 
-    // Simulate processing progress
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            navigation.replace('Results', { scanId: 'SCAN_' + Date.now() });
-          }, 500);
-          return 100;
-        }
-        return prev + 5;
-      });
-    }, 100);
+    try {
+      // Simulate progress while calling API
+      const progressInterval = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 90) {
+            return 90; // Hold at 90% until API responds
+          }
+          return prev + 10;
+        });
+      }, 300);
+
+      setStatusText('Analyzing skin condition...');
+
+      // Call the AI backend with a real URI if provided, otherwise placeholder
+      // (Usually camera would provide a URI here too)
+      const imageUri = uri || 'placeholder_uri';
+      const result: AnalysisResult = await analyzeSkinImage(imageUri);
+
+      clearInterval(progressInterval);
+      setProgress(95);
+      setStatusText('Saving results...');
+
+      // Save to Firestore
+      try {
+        result.image_uri = imageUri;
+        await saveScanResult(result);
+      } catch (firestoreError) {
+        console.warn('Could not save to Firestore (offline?):', firestoreError);
+        // Continue anyway — results still show in the app
+      }
+
+      setProgress(100);
+      setStatusText('Analysis complete!');
+
+      // Navigate to Results with the analysis data
+      setTimeout(() => {
+        navigation.replace('Results', {
+          analysisData: result,
+          scanId: result.scan_id,
+          imageUri: imageUri,
+        });
+      }, 500);
+    } catch (error: any) {
+      setIsProcessing(false);
+      setProgress(0);
+      setStatusText('Align & Hold Steady...');
+      Alert.alert(
+        'Analysis Failed',
+        error.message || 'Could not connect to the AI server. Please try again.',
+        [{ text: 'OK' }],
+      );
+    }
   };
+
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: '#000',
+    },
+    cameraPreview: {
+      flex: 1,
+      backgroundColor: '#1a1a1a',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    placeholderText: {
+      color: colors.white,
+      fontSize: 18,
+      opacity: 0.5,
+    },
+    placeholderSubtext: {
+      color: colors.white,
+      fontSize: 12,
+      opacity: 0.3,
+      marginTop: 8,
+    },
+    overlayContainer: {
+      ...StyleSheet.absoluteFillObject,
+      justifyContent: 'space-between',
+    },
+    topControls: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: 10,
+    },
+    controlButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    autoMode: {
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+    },
+    autoModeText: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    scanFrameContainer: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    scanFrame: {
+      width: width * 0.7,
+      height: width * 0.7,
+      borderRadius: width * 0.35,
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.3)',
+      position: 'relative',
+    },
+    corner: {
+      position: 'absolute',
+      width: 30,
+      height: 30,
+      borderColor: colors.white,
+    },
+    topLeft: {
+      top: -2,
+      left: -2,
+      borderTopWidth: 3,
+      borderLeftWidth: 3,
+      borderTopLeftRadius: width * 0.35,
+    },
+    topRight: {
+      top: -2,
+      right: -2,
+      borderTopWidth: 3,
+      borderRightWidth: 3,
+      borderTopRightRadius: width * 0.35,
+    },
+    bottomLeft: {
+      bottom: -2,
+      left: -2,
+      borderBottomWidth: 3,
+      borderLeftWidth: 3,
+      borderBottomLeftRadius: width * 0.35,
+    },
+    bottomRight: {
+      bottom: -2,
+      right: -2,
+      borderBottomWidth: 3,
+      borderRightWidth: 3,
+      borderBottomRightRadius: width * 0.35,
+    },
+    alignText: {
+      color: colors.white,
+      fontSize: 16,
+      marginTop: 20,
+      opacity: 0.8,
+    },
+    processingContainer: {
+      alignItems: 'center',
+      paddingHorizontal: 40,
+    },
+    progressBar: {
+      width: '100%',
+      height: 6,
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      borderRadius: 3,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: '#4CAF50',
+      borderRadius: 3,
+    },
+    processingText: {
+      color: colors.white,
+      fontSize: 14,
+      marginTop: 12,
+    },
+    bottomControls: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      alignItems: 'center',
+      paddingBottom: 40,
+      paddingHorizontal: 20,
+    },
+    galleryButton: {
+      alignItems: 'center',
+      gap: 4,
+    },
+    captureButton: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      borderWidth: 4,
+      borderColor: colors.white,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    captureButtonDisabled: {
+      borderColor: 'rgba(255,255,255,0.3)',
+    },
+    captureInner: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: colors.white,
+    },
+    captureInnerDisabled: {
+      backgroundColor: 'rgba(255,255,255,0.3)',
+    },
+    cancelButton: {
+      alignItems: 'center',
+      gap: 4,
+    },
+    bottomButtonText: {
+      color: colors.white,
+      fontSize: 12,
+    },
+  });
 
   return (
     <View style={styles.container}>
-      {/* Camera Preview Placeholder */}
       <View style={styles.cameraPreview}>
-        <Text style={styles.placeholderText}>Camera Preview</Text>
-        <Text style={styles.placeholderSubtext}>
-          (Vision Camera integration required)
-        </Text>
+        {device && hasPermission ? (
+          <Camera
+            ref={camera}
+            style={StyleSheet.absoluteFill}
+            device={device}
+            isActive={true} // Keep active to allow capture, handle overlay separately
+            photo={true}
+          />
+        ) : (
+          <View style={styles.cameraPreview}>
+            <Text style={styles.placeholderText}>
+              {!device ? 'No camera device found' : 'No camera permission'}
+            </Text>
+          </View>
+        )}
 
         {/* Overlay UI */}
         <SafeAreaView style={styles.overlayContainer}>
@@ -61,13 +358,13 @@ export default function CameraScreen() {
               style={styles.controlButton}
               onPress={() => navigation.goBack()}
             >
-              <Icon name="flash-off" size={24} color={theme.colors.white} />
+              <Icon name="arrow-left" size={24} color={colors.white} />
             </TouchableOpacity>
             <View style={styles.autoMode}>
               <Text style={styles.autoModeText}>Auto ▼</Text>
             </View>
             <TouchableOpacity style={styles.controlButton}>
-              <Icon name="camera-flip" size={24} color={theme.colors.white} />
+              <Icon name="camera-flip" size={24} color={colors.white} />
             </TouchableOpacity>
           </View>
 
@@ -80,9 +377,7 @@ export default function CameraScreen() {
               <View style={[styles.corner, styles.bottomLeft]} />
               <View style={[styles.corner, styles.bottomRight]} />
             </View>
-            <Text style={styles.alignText}>
-              {isProcessing ? 'Analyzing skin texture...' : 'Align & Hold Steady...'}
-            </Text>
+            <Text style={styles.alignText}>{statusText}</Text>
           </View>
 
           {/* Processing indicator */}
@@ -91,30 +386,36 @@ export default function CameraScreen() {
               <View style={styles.progressBar}>
                 <View style={[styles.progressFill, { width: `${progress}%` }]} />
               </View>
-              <Text style={styles.processingText}>Processing {progress}%</Text>
+              <Text style={styles.processingText}>
+                {progress < 100 ? `Processing ${progress}%` : '✅ Analysis Complete!'}
+              </Text>
             </View>
           )}
 
           {/* Bottom Controls */}
           <View style={styles.bottomControls}>
-            <TouchableOpacity style={styles.galleryButton}>
-              <Icon name="image" size={24} color={theme.colors.white} />
-              <Text style={styles.bottomButtonText}>Gallery</Text>
+            <TouchableOpacity 
+              style={styles.galleryButton}
+              onPress={handleGalleryPicker}
+              disabled={isProcessing}
+            >
+              <Icon name="image" size={24} color={isProcessing ? 'rgba(255,255,255,0.3)' : colors.white} />
+              <Text style={[styles.bottomButtonText, isProcessing && { opacity: 0.3 }]}>Gallery</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.captureButton}
+              style={[styles.captureButton, (isProcessing || !hasPermission) && styles.captureButtonDisabled]}
               onPress={handleCapture}
-              disabled={isProcessing}
+              disabled={isProcessing || !hasPermission}
             >
-              <View style={styles.captureInner} />
+              <View style={[styles.captureInner, (isProcessing || !hasPermission) && styles.captureInnerDisabled]} />
             </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={() => navigation.goBack()}
             >
-              <Icon name="close" size={24} color={theme.colors.white} />
+              <Icon name="close" size={24} color={colors.white} />
               <Text style={styles.bottomButtonText}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -123,164 +424,3 @@ export default function CameraScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  cameraPreview: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    color: theme.colors.white,
-    fontSize: 18,
-    opacity: 0.5,
-  },
-  placeholderSubtext: {
-    color: theme.colors.white,
-    fontSize: 12,
-    opacity: 0.3,
-    marginTop: 8,
-  },
-  overlayContainer: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between',
-  },
-  topControls: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-  },
-  controlButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  autoMode: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  autoModeText: {
-    color: theme.colors.white,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  scanFrameContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scanFrame: {
-    width: width * 0.7,
-    height: width * 0.7,
-    borderRadius: width * 0.35,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.3)',
-    position: 'relative',
-  },
-  corner: {
-    position: 'absolute',
-    width: 30,
-    height: 30,
-    borderColor: theme.colors.white,
-  },
-  topLeft: {
-    top: -2,
-    left: -2,
-    borderTopWidth: 3,
-    borderLeftWidth: 3,
-    borderTopLeftRadius: width * 0.35,
-  },
-  topRight: {
-    top: -2,
-    right: -2,
-    borderTopWidth: 3,
-    borderRightWidth: 3,
-    borderTopRightRadius: width * 0.35,
-  },
-  bottomLeft: {
-    bottom: -2,
-    left: -2,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
-    borderBottomLeftRadius: width * 0.35,
-  },
-  bottomRight: {
-    bottom: -2,
-    right: -2,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
-    borderBottomRightRadius: width * 0.35,
-  },
-  alignText: {
-    color: theme.colors.white,
-    fontSize: 16,
-    marginTop: 20,
-    opacity: 0.8,
-  },
-  processingContainer: {
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
-  progressBar: {
-    width: '100%',
-    height: 6,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#4CAF50',
-    borderRadius: 3,
-  },
-  processingText: {
-    color: theme.colors.white,
-    fontSize: 14,
-    marginTop: 12,
-  },
-  bottomControls: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingBottom: 40,
-    paddingHorizontal: 20,
-  },
-  galleryButton: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  captureButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 4,
-    borderColor: theme.colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captureInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: theme.colors.white,
-  },
-  cancelButton: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  bottomButtonText: {
-    color: theme.colors.white,
-    fontSize: 12,
-  },
-});

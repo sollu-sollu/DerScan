@@ -1,59 +1,293 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { PrimaryButton, InfoCard, ChecklistItem } from '../../components';
-import { theme } from '../../theme';
+import { useTheme } from '../../theme';
+import { getLatestScan } from '../../services/firestore';
+import type { AnalysisResult, RoutineItem, LifestyleItem } from '../../services/api';
 
 export default function PlanScreen() {
-  const [routine, setRoutine] = useState([
-    { id: '1', title: 'Gentle Cleanser', subtitle: 'Use lukewarm water. Pat dry, do not rub.', time: '8:00 AM', checked: true, icon: 'water' },
-    { id: '2', title: 'Apply Steroid Cream', subtitle: 'Topical Corticosteroid to affected areas only.', time: '8:15 AM', checked: true, icon: 'medical-bag' },
-    { id: '3', title: 'Apply Moisturizer', subtitle: 'Apply generously over whole body to lock in moisture.', time: '8:00 PM', checked: false, icon: 'bottle-tonic', reminder: true },
-  ]);
+  const { colors, spacing, borderRadius, typography, isDarkMode } = useTheme();
+  const [isLoading, setIsLoading] = useState(true);
+  const [scanData, setScanData] = useState<AnalysisResult | null>(null);
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
+  const [isRealData, setIsRealData] = useState(false);
 
-  const toggleRoutine = (id: string) => {
-    setRoutine(prev =>
-      prev.map(item => (item.id === id ? { ...item, checked: !item.checked } : item))
-    );
+  useFocusEffect(
+    useCallback(() => {
+      loadLatestScan();
+    }, [])
+  );
+
+  const loadLatestScan = async () => {
+    setIsLoading(true);
+    try {
+      const latest = await getLatestScan();
+      if (latest) {
+        setScanData(latest);
+        const initial: Record<string, boolean> = {};
+        latest.daily_routine?.forEach((_, i) => {
+          initial[String(i)] = false;
+        });
+        setCheckedItems(initial);
+        setIsRealData(true);
+      } else {
+        setIsRealData(false);
+      }
+    } catch (error) {
+      console.error('Failed to load scan data:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const completedCount = routine.filter(item => item.checked).length;
-  const progressPercent = (completedCount / routine.length) * 100;
+  const toggleRoutine = (index: string) => {
+    setCheckedItems(prev => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
+
+  const routine = scanData?.daily_routine ?? [];
+  const lifestyle = scanData?.lifestyle_adjustments ?? [];
+  const completedCount = Object.values(checkedItems).filter(Boolean).length;
+  const progressPercent = routine.length > 0 ? (completedCount / routine.length) * 100 : 0;
+
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContent: {
+      padding: spacing.lg,
+      paddingBottom: 100,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: spacing.md,
+    },
+    loadingText: {
+      ...typography.body,
+      color: colors.textSecondary,
+    },
+    emptyContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: spacing.xl * 1.5,
+      gap: spacing.md,
+    },
+    emptyTitle: {
+      ...typography.h3,
+      color: colors.text,
+    },
+    emptySubtitle: {
+      ...typography.bodySmall,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 20,
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.lg,
+    },
+    title: {
+      ...typography.h3,
+      color: colors.text,
+    },
+    diagnosisCard: {
+      backgroundColor: isDarkMode ? colors.primaryDark : '#E8F4F6',
+      marginBottom: spacing.lg,
+    },
+    diagnosisRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
+    diagnosisLabel: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: colors.primary,
+      marginBottom: 4,
+    },
+    diagnosisName: {
+      ...typography.h3,
+      color: colors.text,
+      marginBottom: spacing.sm,
+    },
+    severityBadge: {
+      backgroundColor: isDarkMode ? '#1B5E20' : '#C8E6C9',
+      alignSelf: 'flex-start',
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+      borderRadius: borderRadius.sm,
+    },
+    severityText: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: isDarkMode ? '#81C784' : '#2E7D32',
+    },
+    diagnosisIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 12,
+      backgroundColor: colors.cardBackground,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    progressSection: {
+      marginBottom: spacing.lg,
+    },
+    progressHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: spacing.sm,
+    },
+    progressTitle: {
+      ...typography.body,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    progressText: {
+      ...typography.caption,
+      color: colors.textLight,
+    },
+    progressBar: {
+      height: 8,
+      backgroundColor: colors.border,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: colors.primary,
+      borderRadius: 4,
+    },
+    section: {
+      marginBottom: spacing.lg,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginBottom: spacing.md,
+    },
+    sectionTitle: {
+      ...typography.body,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    lifestyleRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.md,
+    },
+    lifestyleItem: {
+      flex: 1,
+      minWidth: '45%',
+      backgroundColor: colors.cardBackground,
+      borderRadius: 12,
+      padding: spacing.md,
+      alignItems: 'center',
+    },
+    lifestyleIconBg: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: spacing.sm,
+    },
+    lifestyleTitle: {
+      ...typography.bodySmall,
+      fontWeight: '600',
+      color: colors.text,
+      textAlign: 'center',
+    },
+    lifestyleSubtitle: {
+      ...typography.caption,
+      color: colors.textLight,
+      marginTop: 2,
+      textAlign: 'center',
+    },
+    sourceBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 4,
+      marginLeft: 8,
+    },
+    sourceBadgeText: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: colors.white,
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading treatment plan...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!scanData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.emptyContainer}>
+          <Icon name="clipboard-text-outline" size={64} color={colors.textLight} />
+          <Text style={styles.emptyTitle}>No Treatment Plan Yet</Text>
+          <Text style={styles.emptySubtitle}>
+            Take a skin scan to get a personalized treatment plan from our AI.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity>
-            <Icon name="arrow-left" size={24} color={theme.colors.text} />
-          </TouchableOpacity>
+          <View style={{ width: 24 }} />
           <Text style={styles.title}>Treatment Plan</Text>
           <TouchableOpacity>
-            <Icon name="dots-vertical" size={24} color={theme.colors.text} />
+            <Icon name="dots-vertical" size={24} color={colors.text} />
           </TouchableOpacity>
         </View>
 
         {/* Diagnosis Card */}
         <InfoCard style={styles.diagnosisCard}>
           <View style={styles.diagnosisRow}>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.diagnosisLabel}>DIAGNOSIS</Text>
-              <Text style={styles.diagnosisName}>Eczema (Atopic{'\n'}Dermatitis)</Text>
+              <Text style={styles.diagnosisName}>{scanData.condition_name}</Text>
               <View style={styles.severityBadge}>
-                <Text style={styles.severityText}>Moderate Severity (6.5/10)</Text>
+                <Text style={styles.severityText}>
+                  {scanData.severity_label} ({scanData.severity}/10)
+                </Text>
               </View>
             </View>
             <View style={styles.diagnosisIcon}>
-              <Icon name="medical-bag" size={28} color={theme.colors.primary} />
+              <Icon name="medical-bag" size={28} color={colors.primary} />
             </View>
           </View>
         </InfoCard>
@@ -62,7 +296,9 @@ export default function PlanScreen() {
         <View style={styles.progressSection}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressTitle}>Today's Progress</Text>
-            <Text style={styles.progressText}>{completedCount} of {routine.length} Completed</Text>
+            <Text style={styles.progressText}>
+              {completedCount} of {routine.length} Completed
+            </Text>
           </View>
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
@@ -72,232 +308,51 @@ export default function PlanScreen() {
         {/* Daily Routine */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Icon name="format-list-bulleted" size={20} color={theme.colors.text} />
+            <Icon name="format-list-bulleted" size={20} color={colors.text} />
             <Text style={styles.sectionTitle}>Daily Routine</Text>
+            <View style={[
+              styles.sourceBadge, 
+              { backgroundColor: isRealData ? colors.success : colors.textLight }
+            ]}>
+              <Text style={styles.sourceBadgeText}>
+                {isRealData ? 'LATEST AI SCAN' : 'DEMO DATA'}
+              </Text>
+            </View>
           </View>
           <InfoCard>
-            {routine.map(item => (
-              <View key={item.id}>
-                <ChecklistItem
-                  title={item.title}
-                  subtitle={item.subtitle}
-                  time={item.time}
-                  checked={item.checked}
-                  onToggle={() => toggleRoutine(item.id)}
-                  icon={item.icon}
-                  iconColor={item.checked ? theme.colors.success : theme.colors.primary}
-                />
-                {item.reminder && !item.checked && (
-                  <View style={styles.reminderRow}>
-                    <Text style={styles.reminderLabel}>Reminder</Text>
-                    <Icon name="toggle-switch" size={40} color={theme.colors.primary} />
-                  </View>
-                )}
-              </View>
+            {routine.map((item: RoutineItem, index: number) => (
+              <ChecklistItem
+                key={String(index)}
+                title={item.title}
+                subtitle={item.subtitle}
+                time={item.time}
+                checked={checkedItems[String(index)] ?? false}
+                onToggle={() => toggleRoutine(String(index))}
+                icon={item.icon}
+                iconColor={checkedItems[String(index)] ? colors.success : colors.primary}
+              />
             ))}
           </InfoCard>
         </View>
 
-        {/* Add Custom Treatment */}
-        <TouchableOpacity style={styles.addButton}>
-          <Icon name="plus-circle-outline" size={20} color={theme.colors.primary} />
-          <Text style={styles.addButtonText}>Add Custom Treatment</Text>
-        </TouchableOpacity>
-
         {/* Lifestyle Adjustments */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Lifestyle Adjustments</Text>
-          <View style={styles.lifestyleRow}>
-            <View style={styles.lifestyleItem}>
-              <View style={styles.lifestyleIconBg}>
-                <Icon name="shower" size={24} color="#1976D2" />
-              </View>
-              <Text style={styles.lifestyleTitle}>Short Showers</Text>
-              <Text style={styles.lifestyleSubtitle}>Max 10 mins</Text>
-            </View>
-            <View style={styles.lifestyleItem}>
-              <View style={styles.lifestyleIconBg}>
-                <Icon name="tshirt-crew" size={24} color="#FF5722" />
-              </View>
-              <Text style={styles.lifestyleTitle}>Cotton Clothes</Text>
-              <Text style={styles.lifestyleSubtitle}>Loose fitting</Text>
+        {lifestyle.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Lifestyle Adjustments</Text>
+            <View style={styles.lifestyleRow}>
+              {lifestyle.map((item: LifestyleItem, index: number) => (
+                <View key={index} style={styles.lifestyleItem}>
+                  <View style={styles.lifestyleIconBg}>
+                    <Icon name={item.icon || 'star'} size={24} color={colors.primary} />
+                  </View>
+                  <Text style={styles.lifestyleTitle}>{item.title}</Text>
+                  <Text style={styles.lifestyleSubtitle}>{item.subtitle}</Text>
+                </View>
+              ))}
             </View>
           </View>
-        </View>
-
-        {/* Save Button */}
-        <PrimaryButton
-          title="Save Updates"
-          onPress={() => {}}
-          style={styles.saveButton}
-        />
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 100,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  diagnosisCard: {
-    backgroundColor: '#E8F4F6',
-    marginBottom: 20,
-  },
-  diagnosisRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  diagnosisLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: theme.colors.primary,
-    marginBottom: 4,
-  },
-  diagnosisName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: theme.colors.text,
-    lineHeight: 22,
-    marginBottom: 8,
-  },
-  severityBadge: {
-    backgroundColor: '#C8E6C9',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  severityText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#2E7D32',
-  },
-  diagnosisIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: theme.colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  progressSection: {
-    marginBottom: 20,
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  progressTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  progressText: {
-    fontSize: 12,
-    color: theme.colors.textLight,
-  },
-  progressBar: {
-    height: 8,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: theme.colors.primary,
-    borderRadius: 4,
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  reminderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingLeft: 52,
-    paddingVertical: 4,
-  },
-  reminderLabel: {
-    fontSize: 13,
-    color: theme.colors.text,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 16,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: theme.colors.primary,
-    borderRadius: 12,
-    marginBottom: 24,
-  },
-  addButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: theme.colors.primary,
-  },
-  lifestyleRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  lifestyleItem: {
-    flex: 1,
-    backgroundColor: '#F5F7F8',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  lifestyleIconBg: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: theme.colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  lifestyleTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  lifestyleSubtitle: {
-    fontSize: 11,
-    color: theme.colors.textLight,
-    marginTop: 2,
-  },
-  saveButton: {
-    marginTop: 8,
-  },
-});

@@ -9,15 +9,17 @@ import ScanScreen from '../features/scan/ScanScreen';
 import PlanScreen from '../features/treatment/PlanScreen';
 import TrackScreen from '../features/tracking/TrackScreen';
 import CareScreen from '../features/care/CareScreen';
+import ProfileScreen from '../features/profile/ProfileScreen';
 import ResultsScreen from '../features/results/ResultsScreen';
 import CameraScreen from '../features/scan/CameraScreen';
 
-import { theme } from '../theme';
+import { useTheme } from '../theme';
+import type { AnalysisResult } from '../services/api';
 
 export type RootStackParamList = {
   MainTabs: undefined;
-  Camera: undefined;
-  Results: { scanId?: string };
+  Camera: { selectedImage?: string };
+  Results: { analysisData?: AnalysisResult; scanId?: string; imageUri?: string };
 };
 
 export type MainTabParamList = {
@@ -26,20 +28,23 @@ export type MainTabParamList = {
   Plan: undefined;
   Track: undefined;
   Care: undefined;
+  Profile: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 function MainTabs() {
+  const { colors } = useTheme();
+
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.textLight,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textLight,
         tabBarStyle: {
-          backgroundColor: theme.colors.white,
+          backgroundColor: colors.cardBackground,
           borderTopWidth: 0,
           elevation: 10,
           height: 60,
@@ -98,17 +103,28 @@ function MainTabs() {
           ),
         }}
       />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Icon name="account-outline" size={size} color={color} />
+          ),
+        }}
+      />
     </Tab.Navigator>
   );
 }
 
 export default function AppNavigator() {
+  const { colors, isDarkMode } = useTheme();
+
   return (
     <NavigationContainer>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: theme.colors.background },
+          contentStyle: { backgroundColor: colors.background },
         }}
       >
         <Stack.Screen name="MainTabs" component={MainTabs} />

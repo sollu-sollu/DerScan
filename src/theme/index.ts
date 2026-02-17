@@ -1,24 +1,48 @@
+import { useSettingsStore } from '../store/settingsStore';
+
+export const lightColors = {
+  primary: '#1F4E5A',
+  primaryLight: '#2A6B7A',
+  primaryDark: '#163A44',
+  secondary: '#4ECDC4',
+  accent: '#FF6B6B',
+  success: '#27AE60',
+  warning: '#F39C12',
+  error: '#E74C3C',
+  background: '#F8FAFB',
+  surface: '#FFFFFF',
+  white: '#FFFFFF',
+  black: '#000000',
+  text: '#1A1A2E',
+  textSecondary: '#6B7280',
+  textLight: '#9CA3AF',
+  border: '#E5E7EB',
+  cardBackground: '#FFFFFF',
+  overlay: 'rgba(0, 0, 0, 0.5)',
+};
+
+export const darkColors: typeof lightColors = {
+  primary: '#4ECDC4',
+  primaryLight: '#6EFDEE',
+  primaryDark: '#1F4E5A',
+  secondary: '#1F4E5A',
+  accent: '#FF6B6B',
+  success: '#27AE60',
+  warning: '#F39C12',
+  error: '#E74C3C',
+  background: '#121212',
+  surface: '#1E1E1E',
+  white: '#FFFFFF',
+  black: '#000000',
+  text: '#F8FAFB',
+  textSecondary: '#9CA3AF',
+  textLight: '#6B7280',
+  border: '#333333',
+  cardBackground: '#1E1E1E',
+  overlay: 'rgba(0, 0, 0, 0.7)',
+};
+
 export const theme = {
-  colors: {
-    primary: '#1F4E5A',
-    primaryLight: '#2A6B7A',
-    primaryDark: '#163A44',
-    secondary: '#4ECDC4',
-    accent: '#FF6B6B',
-    success: '#27AE60',
-    warning: '#F39C12',
-    error: '#E74C3C',
-    background: '#F8FAFB',
-    surface: '#FFFFFF',
-    white: '#FFFFFF',
-    black: '#000000',
-    text: '#1A1A2E',
-    textSecondary: '#6B7280',
-    textLight: '#9CA3AF',
-    border: '#E5E7EB',
-    cardBackground: '#FFFFFF',
-    overlay: 'rgba(0, 0, 0, 0.5)',
-  },
   spacing: {
     xs: 4,
     sm: 8,
@@ -91,4 +115,16 @@ export const theme = {
   },
 };
 
-export type Theme = typeof theme;
+export const useTheme = () => {
+  const isDarkMode = useSettingsStore((state) => state.isDarkMode);
+  const colors = isDarkMode ? darkColors : lightColors;
+
+  return {
+    ...theme,
+    colors,
+    isDarkMode,
+  };
+};
+
+export type ThemeColors = typeof lightColors;
+export type Theme = typeof theme & { colors: ThemeColors; isDarkMode: boolean };

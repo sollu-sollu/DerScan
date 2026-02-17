@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { theme } from '../theme';
+import { useTheme } from '../theme';
 
 interface PrimaryButtonProps {
   title: string;
@@ -31,20 +31,29 @@ export function PrimaryButton({
   textStyle,
   variant = 'solid',
 }: PrimaryButtonProps) {
+  const { colors } = useTheme();
+
   if (variant === 'outline') {
     return (
       <TouchableOpacity
         onPress={onPress}
         disabled={disabled || loading}
-        style={[styles.outlineButton, disabled && styles.disabled, style]}
+        style={[
+          styles.outlineButton, 
+          { borderColor: colors.primary },
+          disabled && styles.disabled, 
+          style
+        ]}
         activeOpacity={0.7}
       >
         {loading ? (
-          <ActivityIndicator color={theme.colors.primary} />
+          <ActivityIndicator color={colors.primary} />
         ) : (
           <>
             {icon}
-            <Text style={[styles.outlineText, textStyle]}>{title}</Text>
+            <Text style={[styles.outlineText, { color: colors.primary }, textStyle]}>
+              {title}
+            </Text>
           </>
         )}
       </TouchableOpacity>
@@ -59,17 +68,19 @@ export function PrimaryButton({
       style={[disabled && styles.disabled, style]}
     >
       <LinearGradient
-        colors={['#1F4E5A', '#2A6B7A']}
+        colors={[colors.primary, colors.primaryLight]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={styles.gradient}
       >
         {loading ? (
-          <ActivityIndicator color={theme.colors.white} />
+          <ActivityIndicator color={colors.white} />
         ) : (
           <>
             {icon}
-            <Text style={[styles.buttonText, textStyle]}>{title}</Text>
+            <Text style={[styles.buttonText, { color: colors.white }, textStyle]}>
+              {title}
+            </Text>
           </>
         )}
       </LinearGradient>
@@ -88,7 +99,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   buttonText: {
-    color: theme.colors.white,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -100,11 +110,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: theme.colors.primary,
     gap: 8,
   },
   outlineText: {
-    color: theme.colors.primary,
     fontSize: 16,
     fontWeight: '600',
   },

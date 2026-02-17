@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+Pillow
+pydantic
+python-dotenv
+jinja2
+huggingface_hub
+requests
+pyngrok
