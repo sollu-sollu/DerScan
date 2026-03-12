@@ -7,6 +7,12 @@
 import firestore from '@react-native-firebase/firestore';
 import { AnalysisResult } from './api';
 
+// Enable Firestore offline persistence for offline mode
+firestore().settings({
+  persistence: true,
+  cacheSizeBytes: firestore.CACHE_SIZE_UNLIMITED,
+});
+
 const SCANS_COLLECTION = 'scans';
 
 /**

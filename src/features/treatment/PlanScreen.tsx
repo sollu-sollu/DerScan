@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -15,6 +16,7 @@ import { PrimaryButton, InfoCard, ChecklistItem } from '../../components';
 import { useTheme } from '../../theme';
 import { getLatestScan } from '../../services/firestore';
 import type { AnalysisResult, RoutineItem, LifestyleItem } from '../../services/api';
+import { scheduleRoutineReminders, cancelAllReminders } from '../../services/notificationService';
 
 export default function PlanScreen() {
   const { colors, spacing, borderRadius, typography, isDarkMode } = useTheme();
@@ -22,6 +24,7 @@ export default function PlanScreen() {
   const [scanData, setScanData] = useState<AnalysisResult | null>(null);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [isRealData, setIsRealData] = useState(false);
+  const [remindersOn, setRemindersOn] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -318,6 +321,45 @@ export default function PlanScreen() {
                 {isRealData ? 'LATEST AI SCAN' : 'DEMO DATA'}
               </Text>
             </View>
+            {/* Reminder Toggle */}
+            {routine.length > 0 && (
+              <TouchableOpacity
+                style={{
+                  marginLeft: 'auto',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: remindersOn
+                    ? (isDarkMode ? '#1B5E20' : '#E8F5E9')
+                    : (isDarkMode ? '#333' : '#F0F0F0'),
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 16,
+                }}
+                onPress={() => {
+                  if (remindersOn) {
+                    cancelAllReminders();
+                    setRemindersOn(false);
+                    Alert.alert('Reminders Off', 'Daily routine reminders have been turned off.');
+                  } else {
+                    scheduleRoutineReminders(routine);
+                    setRemindersOn(true);
+                    Alert.alert('Reminders Set! ⏰', `${routine.length} daily reminders have been scheduled.`);
+                  }
+                }}
+              >
+                <Icon
+                  name={remindersOn ? 'bell-ring' : 'bell-outline'}
+                  size={14}
+                  color={remindersOn ? colors.success : colors.textLight}
+                />
+                <Text style={{
+                  fontSize: 10, fontWeight: '600', marginLeft: 4,
+                  color: remindersOn ? colors.success : colors.textLight,
+                }}>
+                  {remindersOn ? 'ON' : 'Remind'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
           <InfoCard>
             {routine.map((item: RoutineItem, index: number) => (

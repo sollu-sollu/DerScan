@@ -16,10 +16,12 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import { useTheme } from '../../theme';
 import { getScanHistory } from '../../services/firestore';
 import { AnalysisResult } from '../../services/api';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 
 export default function ScanScreen() {
   const navigation = useNavigation<any>();
   const { colors, spacing, borderRadius, shadows, isDarkMode } = useTheme();
+  const { isOffline } = useNetworkStatus();
   
   const [history, setHistory] = useState<(AnalysisResult & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
@@ -285,6 +287,18 @@ export default function ScanScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Smart Scan</Text>
         <Text style={styles.headerSubtitle}>AI-powered skin analysis</Text>
+        {isOffline && (
+          <View style={{
+            flexDirection: 'row', alignItems: 'center',
+            backgroundColor: '#FF980020', paddingHorizontal: 10,
+            paddingVertical: 4, borderRadius: 12, marginTop: 8, alignSelf: 'flex-start',
+          }}>
+            <Icon name="wifi-off" size={14} color="#FF9800" />
+            <Text style={{ color: '#FF9800', fontSize: 11, fontWeight: '600', marginLeft: 4 }}>
+              Offline — Viewing cached data
+            </Text>
+          </View>
+        )}
       </View>
 
       <ScrollView 

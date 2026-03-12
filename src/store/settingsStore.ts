@@ -55,7 +55,7 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     set => ({
-      apiUrl: 'http://10.0.2.2:8000', // Default for emulator
+      apiUrl: 'http://10.0.2.2:8001', // Default for emulator
       isDarkMode: false,
       userName: 'Guest User',
       userAvatar: null,

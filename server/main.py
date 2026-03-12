@@ -435,14 +435,14 @@ if __name__ == "__main__":
     print("  MedGemma 4B (Q4_K_M) — CUDA 13.0")
     print("=" * 50)
     print()
-    print("Starting server on http://0.0.0.0:8000")
-    print("API docs: http://localhost:8000/docs")
+    print("Starting server on http://0.0.0.0:8001")
+    print("API docs: http://localhost:8001/docs")
     print()
     
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8001,
         reload=False,
         log_level="info",
     )

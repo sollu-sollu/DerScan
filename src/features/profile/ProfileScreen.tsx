@@ -231,7 +231,7 @@ const ProfileScreen = () => {
               style={styles.input}
               value={localUrl}
               onChangeText={setLocalUrl}
-              placeholder="http://192.168.x.x:8000"
+              placeholder="http://192.168.x.x:8001"
               placeholderTextColor={colors.textLight}
               onFocus={() => setIsEditing(true)}
               autoCapitalize="none"

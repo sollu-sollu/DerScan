@@ -8,7 +8,7 @@ def start_tunnel():
     load_dotenv()
     
     auth_token = os.getenv("NGROK_AUTH_TOKEN")
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 8001))
     
     if not auth_token or auth_token == "YOUR_NGROK_AUTH_TOKEN":
         print("[ERROR] NGROK_AUTH_TOKEN not found in .env file.")
