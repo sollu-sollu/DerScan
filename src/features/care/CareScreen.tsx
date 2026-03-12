@@ -50,6 +50,8 @@ export default function CareScreen() {
   const [userLat, setUserLat] = useState<number | null>(null);
   const [userLng, setUserLng] = useState<number | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [activeRoute, setActiveRoute] = useState<[number, number][] | undefined>();
+  const [isRoutingId, setIsRoutingId] = useState<string | null>(null);
 
   useEffect(() => {
     requestLocationAndFetch();
@@ -192,9 +194,32 @@ export default function CareScreen() {
     else Alert.alert('No Phone', 'No phone number available for this clinic.');
   };
 
-  const handleDirections = (lat: number, lng: number, name: string) => {
-    const url = `https://www.openstreetmap.org/directions?from=${userLat},${userLng}&to=${lat},${lng}#map=15/${lat}/${lng}`;
-    Linking.openURL(url);
+  const fetchRoute = async (destLat: number, destLng: number, clinicId: string) => {
+    if (!userLat || !userLng) return;
+    setIsRoutingId(clinicId);
+    
+    try {
+      // OSRM requires coordinates in [longitude, latitude] format
+      const response = await fetch(
+        `https://router.project-osrm.org/route/v1/driving/${userLng},${userLat};${destLng},${destLat}?overview=full&geometries=geojson`
+      );
+      const data = await response.json();
+      
+      if (data.routes && data.routes.length > 0) {
+        // OSRM returns [lng, lat], our MapView expects [lat, lng]
+        const coords: [number, number][] = data.routes[0].geometry.coordinates.map(
+          (c: number[]) => [c[1], c[0]]
+        );
+        setActiveRoute(coords);
+      } else {
+        Alert.alert('Route Error', 'Could not find a route to this location.');
+      }
+    } catch (e) {
+      console.error('OSRM Routing Error:', e);
+      Alert.alert('Network Error', 'Could not fetch directions.');
+    } finally {
+      setIsRoutingId(null);
+    }
   };
 
   const filteredPlaces = searchQuery
@@ -333,6 +358,7 @@ export default function CareScreen() {
               latitude={userLat}
               longitude={userLng}
               markers={mapMarkers}
+              route={activeRoute}
               height={280}
               borderRadius={borderRadius.lg}
             />
@@ -391,17 +417,34 @@ export default function CareScreen() {
 
                 <View style={styles.clinicActions}>
                   {clinic.phone ? (
-                    <TouchableOpacity style={styles.actionBtn} onPress={() => handleCall(clinic.phone!)}>
+                    <TouchableOpacity
+                      style={styles.actionBtn}
+                      onPress={() => handleCall(clinic.phone || '')}
+                    >
                       <Icon name="phone" size={16} color={colors.text} />
                       <Text style={styles.actionBtnText}>Call</Text>
                     </TouchableOpacity>
                   ) : null}
+
                   <TouchableOpacity
-                    style={[styles.actionBtn, styles.primaryActionBtn]}
-                    onPress={() => handleDirections(clinic.lat, clinic.lng, clinic.name)}
+                    style={[
+                      styles.actionBtn, 
+                      styles.primaryActionBtn,
+                      activeRoute && isRoutingId === clinic.id ? { opacity: 0.7 } : {}
+                    ]}
+                    onPress={() => fetchRoute(clinic.lat, clinic.lng, clinic.id)}
+                    disabled={isRoutingId !== null}
                   >
-                    <Icon name="directions" size={16} color={isDarkMode ? colors.primaryDark : colors.white} />
-                    <Text style={[styles.actionBtnText, styles.primaryActionText]}>Directions</Text>
+                    {isRoutingId === clinic.id ? (
+                      <ActivityIndicator size="small" color={isDarkMode ? colors.primaryDark : colors.white} />
+                    ) : (
+                      <>
+                        <Icon name="navigation-variant" size={16} color={isDarkMode ? colors.primaryDark : colors.white} />
+                        <Text style={[styles.actionBtnText, styles.primaryActionText]}>
+                          {activeRoute && isRoutingId === clinic.id ? 'Route Drawn' : 'Directions'}
+                        </Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                 </View>
               </InfoCard>
