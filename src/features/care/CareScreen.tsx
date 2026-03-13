@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Geolocation from '@react-native-community/geolocation';
 
-import { InfoCard } from '../../components';
+import { InfoCard, CustomModal } from '../../components';
 import LeafletMapView from '../../components/MapView';
 import { useTheme } from '../../theme';
 
@@ -52,6 +52,14 @@ export default function CareScreen() {
   const [locationError, setLocationError] = useState<string | null>(null);
   const [activeRoute, setActiveRoute] = useState<[number, number][] | undefined>();
   const [isRoutingId, setIsRoutingId] = useState<string | null>(null);
+
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalContent, setModalContent] = useState<{
+    title: string;
+    subtitle: string;
+    icon: string;
+    iconColor?: string;
+  } | null>(null);
 
   useEffect(() => {
     requestLocationAndFetch();
@@ -191,7 +199,15 @@ export default function CareScreen() {
 
   const handleCall = (phone: string) => {
     if (phone) Linking.openURL(`tel:${phone}`);
-    else Alert.alert('No Phone', 'No phone number available for this clinic.');
+    else {
+      setModalContent({
+        title: 'No Phone Number',
+        subtitle: 'Apologies, we do not have a contact number for this specific clinic in our records.',
+        icon: 'phone-off',
+        iconColor: colors.textLight,
+      });
+      setModalVisible(true);
+    }
   };
 
   const fetchRoute = async (destLat: number, destLng: number, clinicId: string) => {
@@ -216,7 +232,13 @@ export default function CareScreen() {
       }
     } catch (e) {
       console.error('OSRM Routing Error:', e);
-      Alert.alert('Network Error', 'Could not fetch directions.');
+      setModalContent({
+        title: 'Route Error',
+        subtitle: 'Could not fetch directions at this time. Please check your internet connection.',
+        icon: 'map-marker-off',
+        iconColor: colors.error,
+      });
+      setModalVisible(true);
     } finally {
       setIsRoutingId(null);
     }
@@ -465,6 +487,18 @@ export default function CareScreen() {
           </InfoCard>
         </View>
       </ScrollView>
+
+      {/* Shared Custom Modal */}
+      {modalContent && (
+        <CustomModal
+          visible={modalVisible}
+          onClose={() => setModalVisible(false)}
+          title={modalContent.title}
+          subtitle={modalContent.subtitle}
+          icon={modalContent.icon}
+          iconColor={modalContent.iconColor}
+        />
+      )}
     </SafeAreaView>
   );
 }

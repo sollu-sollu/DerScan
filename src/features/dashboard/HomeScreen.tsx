@@ -6,11 +6,15 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
+  ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../../theme';
 import { useSettingsStore } from '../../store/settingsStore';
+import { useProgressStore } from '../../store/progressStore';
+import { useAuthStore } from '../../store/authStore';
 import { getLatestScan } from '../../services/firestore';
 import type { RoutineItem } from '../../services/api';
 
@@ -34,7 +38,9 @@ const DEFAULT_CHECKLIST: ChecklistItemData[] = [
 export default function HomeScreen() {
   const navigation = useNavigation();
   const { colors, spacing, borderRadius, shadows, isDarkMode } = useTheme();
-  const { userName } = useSettingsStore();
+  const { apiUrl } = useSettingsStore();
+  const { activeSeriesId } = useProgressStore();
+  const { user } = useAuthStore();
   
   const [checklist, setChecklist] = useState<ChecklistItemData[]>(DEFAULT_CHECKLIST);
   const [latestCondition, setLatestCondition] = useState<string | null>(null);
@@ -44,12 +50,12 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadRoutine();
-    }, [])
+    }, [activeSeriesId])
   );
 
   const loadRoutine = async () => {
     try {
-      const latest = await getLatestScan();
+      const latest = await getLatestScan(activeSeriesId || undefined);
       if (latest && latest.daily_routine && latest.daily_routine.length > 0) {
         setLatestCondition(latest.condition_name);
         const aiRoutine: ChecklistItemData[] = latest.daily_routine.map(
@@ -348,10 +354,25 @@ export default function HomeScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>{greeting}, {userName.split(' ')[0]}! 👋</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.greeting}>{greeting}, {(user?.displayName || 'User').split(' ')[0]}! 👋</Text>
           <Text style={styles.date}>{dateStr}</Text>
         </View>
+        <TouchableOpacity 
+          style={{ marginRight: spacing.md }}
+          onPress={() => navigation.navigate('Profile' as never)}
+        >
+          {user?.photoURL ? (
+            <Image 
+              source={{ uri: user.photoURL }} 
+              style={{ width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)' }} 
+            />
+          ) : (
+            <View style={styles.notificationBtn}>
+              <Icon name="account" size={24} color={colors.white} />
+            </View>
+          )}
+        </TouchableOpacity>
         <TouchableOpacity style={styles.notificationBtn}>
           <Icon name="bell-outline" size={24} color={colors.white} />
         </TouchableOpacity>

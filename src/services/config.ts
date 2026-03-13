@@ -19,3 +19,10 @@ export const API_ENDPOINTS = {
   analyze: `${API_BASE_URL}/analyze`,
   analyzeMock: `${API_BASE_URL}/analyze/mock`,
 } as const;
+
+// Cloudinary Configuration for Image Persistence
+export const CLOUDINARY_CONFIG = {
+  CLOUD_NAME: 'daqviovqe',
+  UPLOAD_PRESET: 'derscan',
+  API_URL: 'https://api.cloudinary.com/v1_1/daqviovqe/image/upload',
+};

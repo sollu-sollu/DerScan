@@ -38,6 +38,9 @@ export interface AnalysisResult {
   image_uri?: string;
   clinical_features?: string[];
   differential_diagnosis?: string[];
+  seriesId?: string;
+  isTemp?: boolean;
+  isBaseline?: boolean;
 }
 
 export interface HealthStatus {

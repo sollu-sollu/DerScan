@@ -12,14 +12,22 @@ import CareScreen from '../features/care/CareScreen';
 import ProfileScreen from '../features/profile/ProfileScreen';
 import ResultsScreen from '../features/results/ResultsScreen';
 import CameraScreen from '../features/scan/CameraScreen';
+import LoginScreen from '../features/auth/LoginScreen';
+import SignUpScreen from '../features/auth/SignUpScreen';
 
 import { useTheme } from '../theme';
 import type { AnalysisResult } from '../services/api';
+import auth from '@react-native-firebase/auth';
+import { useAuthStore } from '../store/authStore';
+import { ActivityIndicator, View } from 'react-native';
 
 export type RootStackParamList = {
+  AuthStack: undefined;
   MainTabs: undefined;
   Camera: { selectedImage?: string };
   Results: { analysisData?: AnalysisResult; scanId?: string; imageUri?: string };
+  Login: undefined;
+  SignUp: undefined;
 };
 
 export type MainTabParamList = {
@@ -118,6 +126,22 @@ function MainTabs() {
 
 export default function AppNavigator() {
   const { colors, isDarkMode } = useTheme();
+  const { isAuthenticated, isLoading, setUser, setLoading } = useAuthStore();
+
+  React.useEffect(() => {
+    const subscriber = auth().onAuthStateChanged((user) => {
+      setUser(user);
+    });
+    return subscriber; // unsubscribe on unmount
+  }, [setUser]);
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <NavigationContainer>
@@ -127,17 +151,28 @@ export default function AppNavigator() {
           contentStyle: { backgroundColor: colors.background },
         }}
       >
-        <Stack.Screen name="MainTabs" component={MainTabs} />
-        <Stack.Screen
-          name="Camera"
-          component={CameraScreen}
-          options={{ animation: 'slide_from_bottom' }}
-        />
-        <Stack.Screen
-          name="Results"
-          component={ResultsScreen}
-          options={{ animation: 'fade' }}
-        />
+        {isAuthenticated ? (
+          // Main App Flow
+          <>
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen
+              name="Camera"
+              component={CameraScreen}
+              options={{ animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="Results"
+              component={ResultsScreen}
+              options={{ animation: 'fade' }}
+            />
+          </>
+        ) : (
+          // Authentication Flow
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="SignUp" component={SignUpScreen} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

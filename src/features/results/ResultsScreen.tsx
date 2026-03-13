@@ -12,9 +12,14 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { PrimaryButton, InfoCard } from '../../components';
+import { PrimaryButton, InfoCard, CustomModal } from '../../components';
 import { useTheme } from '../../theme';
 import { RootStackParamList } from '../../navigation/AppNavigator';
+import { generateAndSharePDF } from '../../services/pdfService';
+import { useAuthStore } from '../../store/authStore';
+import { ActivityIndicator, Pressable } from 'react-native';
+import { saveScanResult, getLatestScan, getUserSeries } from '../../services/firestore';
+import { AnalysisResult } from '../../services/api';
 
 type ResultsRouteProp = RouteProp<RootStackParamList, 'Results'>;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -44,6 +49,78 @@ export default function ResultsScreen() {
   const scanId = analysisData?.scan_id ?? route.params?.scanId ?? '#------';
   const precautions = analysisData?.precautions ?? [];
   const whenToSeeDoctor = analysisData?.when_to_see_doctor ?? '';
+
+  const { user } = useAuthStore();
+  const [isGeneratingPdf, setIsGeneratingPdf] = React.useState(false);
+  const [saveModalVisible, setSaveModalVisible] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [notifyModalVisible, setNotifyModalVisible] = React.useState(false);
+  const [notifyModalContent, setNotifyModalContent] = React.useState<{
+    title: string;
+    subtitle: string;
+    icon: string;
+    iconColor?: string;
+  } | null>(null);
+  const [matchingSeries, setMatchingSeries] = React.useState<{id: string, name: string} | null>(null);
+  const [allSeries, setAllSeries] = React.useState<{id: string, name: string}[]>([]);
+
+  React.useEffect(() => {
+    const checkMatchingSeries = async () => {
+      const latest = await getLatestScan();
+      const series = await getUserSeries();
+      setAllSeries(series);
+
+      if (latest && latest.condition_name === conditionName) {
+        setMatchingSeries({ id: latest.seriesId!, name: latest.condition_name });
+      }
+    };
+    checkMatchingSeries();
+  }, [conditionName]);
+
+  const handleShareReport = async () => {
+    // ... same as before ...
+  };
+
+  const handleSaveResult = async (type: 'current' | 'new' | 'temp') => {
+    if (!analysisData) return;
+    
+    setIsSaving(true);
+    try {
+      const resultToSave: AnalysisResult = {
+        ...analysisData,
+        image_uri: scannedImageUri,
+        scan_id: scanId,
+      };
+
+      if (type === 'current' && matchingSeries) {
+        resultToSave.seriesId = matchingSeries.id;
+        resultToSave.isTemp = false;
+        resultToSave.isBaseline = false;
+      } else if (type === 'new') {
+        resultToSave.seriesId = `SERIES_${Date.now()}`;
+        resultToSave.isTemp = false;
+        resultToSave.isBaseline = true;
+      } else {
+        resultToSave.seriesId = 'TEMP';
+        resultToSave.isTemp = true;
+        resultToSave.isBaseline = false;
+      }
+
+      await saveScanResult(resultToSave);
+      setSaveModalVisible(false);
+      navigation.navigate('MainTabs', { screen: 'Track' } as any);
+    } catch (error) {
+      setNotifyModalContent({
+        title: 'Save Error',
+        subtitle: 'Could not save the results. Please check your storage or internet connection.',
+        icon: 'content-save-alert-outline',
+        iconColor: colors.error,
+      });
+      setNotifyModalVisible(true);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const severityColor = getSeverityColor(severity);
 
@@ -351,6 +428,30 @@ export default function ResultsScreen() {
       marginBottom: spacing.md,
       backgroundColor: isDarkMode ? '#2B1212' : '#FFEBEE',
     },
+    saveOptionPremium: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: spacing.md,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: spacing.md,
+    },
+    saveOptionIconSmall: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    saveOptionTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    saveOptionCaption: {
+      fontSize: 11,
+      marginTop: 2,
+    },
   });
 
   return (
@@ -494,8 +595,17 @@ export default function ResultsScreen() {
 
         {/* Action Buttons */}
         <PrimaryButton
-          title="View Treatment Plan"
-          onPress={() => navigation.navigate('MainTabs')}
+          title={isGeneratingPdf ? "Generating Report..." : "Share Clinical Report"}
+          onPress={handleShareReport}
+          variant="outline"
+          style={styles.actionButton}
+          disabled={isGeneratingPdf}
+          icon={isGeneratingPdf ? undefined : <Icon name="share-variant" size={20} color={colors.primary} />}
+        />
+
+        <PrimaryButton
+          title="Finalize & Save Result"
+          onPress={() => setSaveModalVisible(true)}
           style={styles.actionButton}
         />
 
@@ -503,10 +613,79 @@ export default function ResultsScreen() {
           style={styles.secondaryButton}
           onPress={() => navigation.navigate('MainTabs')}
         >
-          <Icon name="home" size={20} color={colors.primary} />
-          <Text style={styles.secondaryButtonText}>Go to Home</Text>
+          <Icon name="close" size={20} color={colors.textLight} />
+          <Text style={styles.secondaryButtonText}>Discard Result</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Save Options Modal */}
+      <CustomModal
+        visible={saveModalVisible}
+        onClose={() => setSaveModalVisible(false)}
+        title="Finalize & Save"
+        subtitle="Categorizing your scans keeps your healing progress accurate."
+        icon="shield-check"
+      >
+        <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+          {matchingSeries ? (
+            <TouchableOpacity 
+              style={[
+                styles.saveOptionPremium, 
+                { borderColor: colors.primary, backgroundColor: colors.primary + '08' }
+              ]}
+              onPress={() => handleSaveResult('current')}
+            >
+              <View style={[styles.saveOptionIconSmall, { backgroundColor: colors.primary }]}>
+                <Icon name="check-decagram" size={20} color="#FFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.saveOptionTitle, { color: colors.text }]}>Add to Active Journey</Text>
+                <Text style={[styles.saveOptionCaption, { color: colors.primary }]}>
+                  Matches current "{matchingSeries.name}" progress
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
+
+          <TouchableOpacity 
+            style={styles.saveOptionPremium}
+            onPress={() => handleSaveResult('new')}
+          >
+            <View style={[styles.saveOptionIconSmall, { backgroundColor: colors.secondary }]}>
+              <Icon name="plus-circle" size={20} color="#FFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.saveOptionTitle, { color: colors.text }]}>Start New Journey</Text>
+              <Text style={[styles.saveOptionCaption, { color: colors.textLight }]}>Creates a new healing chart</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.saveOptionPremium}
+            onPress={() => handleSaveResult('temp')}
+          >
+            <View style={[styles.saveOptionIconSmall, { backgroundColor: colors.textLight }]}>
+              <Icon name="folder-outline" size={20} color="#FFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.saveOptionTitle, { color: colors.text }]}>Save as Individual Scan</Text>
+              <Text style={[styles.saveOptionCaption, { color: colors.textLight }]}>Will not affect journey stats</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </CustomModal>
+
+      {/* Generic Notification Modal */}
+      {notifyModalContent && (
+        <CustomModal
+          visible={notifyModalVisible}
+          onClose={() => setNotifyModalVisible(false)}
+          title={notifyModalContent.title}
+          subtitle={notifyModalContent.subtitle}
+          icon={notifyModalContent.icon}
+          iconColor={notifyModalContent.iconColor}
+        />
+      )}
     </SafeAreaView>
   );
 }

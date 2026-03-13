@@ -14,6 +14,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useTheme } from '../../theme';
+import { CustomModal } from '../../components';
 import { getScanHistory } from '../../services/firestore';
 import { AnalysisResult } from '../../services/api';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
@@ -25,6 +26,14 @@ export default function ScanScreen() {
   
   const [history, setHistory] = useState<(AnalysisResult & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalContent, setModalContent] = useState<{
+    title: string;
+    subtitle: string;
+    icon: string;
+    iconColor?: string;
+  } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -60,7 +69,13 @@ export default function ScanScreen() {
       if (result.didCancel) return;
       
       if (result.errorCode) {
-        Alert.alert('Error', result.errorMessage || `Picker Error: ${result.errorCode}`);
+        setModalContent({
+          title: 'Gallery Error',
+          subtitle: result.errorMessage || `An error occurred while opening the gallery (Error: ${result.errorCode})`,
+          icon: 'image-remove',
+          iconColor: colors.error,
+        });
+        setModalVisible(true);
         return;
       }
 
@@ -68,7 +83,13 @@ export default function ScanScreen() {
         navigation.navigate('Camera', { selectedImage: result.assets[0].uri });
       }
     } catch (error: any) {
-       Alert.alert('Error', `Unexpected Error: ${error.message || 'Unknown'}`);
+       setModalContent({
+         title: 'Error',
+         subtitle: error.message || 'An unexpected error occurred. Please try again.',
+         icon: 'alert-circle-outline',
+         iconColor: colors.error,
+       });
+       setModalVisible(true);
     }
   };
 
@@ -436,6 +457,18 @@ export default function ScanScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Shared Custom Modal */}
+      {modalContent && (
+        <CustomModal
+          visible={modalVisible}
+          onClose={() => setModalVisible(false)}
+          title={modalContent.title}
+          subtitle={modalContent.subtitle}
+          icon={modalContent.icon}
+          iconColor={modalContent.iconColor}
+        />
+      )}
     </View>
   );
 }

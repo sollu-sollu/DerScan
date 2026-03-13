@@ -11,31 +11,44 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 
-import { PrimaryButton, InfoCard, ChecklistItem } from '../../components';
+import { PrimaryButton, InfoCard, ChecklistItem, CustomModal } from '../../components';
 import { useTheme } from '../../theme';
+import { useSettingsStore } from '../../store/settingsStore';
+import { useProgressStore } from '../../store/progressStore';
 import { getLatestScan } from '../../services/firestore';
 import type { AnalysisResult, RoutineItem, LifestyleItem } from '../../services/api';
 import { scheduleRoutineReminders, cancelAllReminders } from '../../services/notificationService';
 
 export default function PlanScreen() {
-  const { colors, spacing, borderRadius, typography, isDarkMode } = useTheme();
+  const navigation = useNavigation();
+  const { colors, spacing, borderRadius, typography, shadows, isDarkMode } = useTheme();
+  const { userName } = useSettingsStore();
+  const { activeSeriesId } = useProgressStore();
   const [isLoading, setIsLoading] = useState(true);
   const [scanData, setScanData] = useState<AnalysisResult | null>(null);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [isRealData, setIsRealData] = useState(false);
   const [remindersOn, setRemindersOn] = useState(false);
+  const [notifyModalVisible, setNotifyModalVisible] = useState(false);
+  const [notifyModalContent, setNotifyModalContent] = useState<{
+    title: string;
+    subtitle: string;
+    icon: string;
+    iconColor?: string;
+  } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       loadLatestScan();
-    }, [])
+    }, [activeSeriesId])
   );
 
   const loadLatestScan = async () => {
     setIsLoading(true);
     try {
-      const latest = await getLatestScan();
+      const latest = await getLatestScan(activeSeriesId || undefined);
       if (latest) {
         setScanData(latest);
         const initial: Record<string, boolean> = {};
@@ -46,6 +59,7 @@ export default function PlanScreen() {
         setIsRealData(true);
       } else {
         setIsRealData(false);
+        setScanData(null);
       }
     } catch (error) {
       console.error('Failed to load scan data:', error);
@@ -339,11 +353,23 @@ export default function PlanScreen() {
                   if (remindersOn) {
                     cancelAllReminders();
                     setRemindersOn(false);
-                    Alert.alert('Reminders Off', 'Daily routine reminders have been turned off.');
+                    setNotifyModalContent({
+                      title: 'Reminders Off',
+                      subtitle: 'Daily routine reminders have been turned off.',
+                      icon: 'bell-off-outline',
+                      iconColor: colors.textSecondary,
+                    });
+                    setNotifyModalVisible(true);
                   } else {
                     scheduleRoutineReminders(routine);
                     setRemindersOn(true);
-                    Alert.alert('Reminders Set! ⏰', `${routine.length} daily reminders have been scheduled.`);
+                    setNotifyModalContent({
+                      title: 'Reminders Set! ⏰',
+                      subtitle: `${routine.length} daily reminders have been scheduled to help you stay on track.`,
+                      icon: 'bell-check-outline',
+                      iconColor: colors.success,
+                    });
+                    setNotifyModalVisible(true);
                   }
                 }}
               >
@@ -395,6 +421,18 @@ export default function PlanScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Notification Modal */}
+      {notifyModalContent && (
+        <CustomModal
+          visible={notifyModalVisible}
+          onClose={() => setNotifyModalVisible(false)}
+          title={notifyModalContent.title}
+          subtitle={notifyModalContent.subtitle}
+          icon={notifyModalContent.icon}
+          iconColor={notifyModalContent.iconColor}
+        />
+      )}
     </SafeAreaView>
   );
 }

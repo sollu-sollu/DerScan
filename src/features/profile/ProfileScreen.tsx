@@ -14,47 +14,114 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useTheme } from '../../theme';
 import { useSettingsStore } from '../../store/settingsStore';
-import { PrimaryButton } from '../../components/PrimaryButton';
+import { useAuthStore } from '../../store/authStore';
+import { PrimaryButton, CustomModal } from '../../components';
+import { uploadImageToCloudinary } from '../../services/cloudinaryService';
+import auth from '@react-native-firebase/auth';
 
 const ProfileScreen = () => {
   const { colors, spacing, borderRadius, typography, shadows, isDarkMode } = useTheme();
   const { 
-    userName, 
     userAvatar, 
     apiUrl, 
-    setUserName, 
     setUserAvatar, 
     setApiUrl, 
     toggleDarkMode 
   } = useSettingsStore();
+  const { user, reloadUser } = useAuthStore();
 
-  const [localName, setLocalName] = useState(userName);
+  const [localName, setLocalName] = useState(user?.displayName || 'User');
   const [localUrl, setLocalUrl] = useState(apiUrl);
   const [isEditing, setIsEditing] = useState(false);
 
-  const handlePickImage = async () => {
-    const result = await launchImageLibrary({
-      mediaType: 'photo',
-      quality: 0.7,
-    });
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalContent, setModalContent] = useState<{
+    title: string;
+    subtitle: string;
+    icon: string;
+    iconColor?: string;
+    actions?: any[];
+  } | null>(null);
 
-    if (result.assets && result.assets.length > 0) {
-      setUserAvatar(result.assets[0].uri || null);
+  const handlePickImage = async () => {
+    try {
+      const result = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.7,
+      });
+
+      if (result.assets && result.assets.length > 0 && result.assets[0].uri) {
+        const localUri = result.assets[0].uri;
+        
+        // Show immediate local feedback
+        setUserAvatar(localUri);
+
+        // Upload to Cloudinary for permanent storage
+        const cloudUrl = await uploadImageToCloudinary(localUri);
+        
+        // Save to Firebase Profile
+        if (auth().currentUser) {
+          await auth().currentUser!.updateProfile({ photoURL: cloudUrl });
+          await reloadUser();
+        }
+        
+        setUserAvatar(cloudUrl);
+      }
+    } catch (error: any) {
+      setModalContent({
+        title: 'Upload Error',
+        subtitle: error.message || 'Failed to upload profile picture.',
+        icon: 'image-remove',
+        iconColor: colors.error,
+      });
+      setModalVisible(true);
     }
   };
 
-  const handleSave = () => {
-    setUserName(localName);
-    setApiUrl(localUrl);
-    setIsEditing(false);
-    Alert.alert('Success', 'Profile updated successfully!');
+  const handleSave = async () => {
+    try {
+      if (auth().currentUser) {
+        await auth().currentUser!.updateProfile({ displayName: localName });
+        await reloadUser();
+      }
+      setApiUrl(localUrl);
+      setIsEditing(false);
+      setModalContent({
+        title: 'Success',
+        subtitle: 'Your profile has been updated successfully!',
+        icon: 'check-circle-outline',
+        iconColor: colors.success,
+      });
+      setModalVisible(true);
+    } catch (e: any) {
+      setModalContent({
+        title: 'Update Failed',
+        subtitle: e.message || 'Could not update your profile. Please try again.',
+        icon: 'alert-circle-outline',
+        iconColor: colors.error,
+      });
+      setModalVisible(true);
+    }
   };
 
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout? (Mock)', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Logout', style: 'destructive', onPress: () => console.log('Logout pressed') },
-    ]);
+    setModalContent({
+      title: 'Logout',
+      subtitle: 'Are you sure you want to log out of DerScan?',
+      icon: 'logout',
+      iconColor: colors.error,
+      actions: [
+        { 
+          label: 'Log Out', 
+          variant: 'destructive',
+          onPress: () => {
+            setModalVisible(false);
+            auth().signOut();
+          }
+        }
+      ]
+    });
+    setModalVisible(true);
   };
 
   const styles = StyleSheet.create({
@@ -184,8 +251,8 @@ const ProfileScreen = () => {
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
         <View style={styles.avatarContainer}>
-          {userAvatar ? (
-            <Image source={{ uri: userAvatar }} style={styles.avatar} />
+          {(userAvatar || user?.photoURL) ? (
+            <Image source={{ uri: userAvatar || user?.photoURL || undefined }} style={styles.avatar} />
           ) : (
             <View style={styles.avatarPlaceholder}>
               <Icon name="account" size={60} color={colors.primary} />
@@ -195,7 +262,10 @@ const ProfileScreen = () => {
             <Icon name="camera" size={20} color={colors.white} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.nameText}>{userName}</Text>
+        <Text style={styles.nameText}>{user?.displayName || 'User'}</Text>
+        <Text style={{ ...typography.bodySmall, color: colors.white, opacity: 0.8, marginTop: 4 }}>
+          {user?.email || 'No email'}
+        </Text>
       </View>
 
       <View style={styles.content}>
@@ -275,6 +345,19 @@ const ProfileScreen = () => {
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Shared Custom Modal */}
+      {modalContent && (
+        <CustomModal
+          visible={modalVisible}
+          onClose={() => setModalVisible(false)}
+          title={modalContent.title}
+          subtitle={modalContent.subtitle}
+          icon={modalContent.icon}
+          iconColor={modalContent.iconColor}
+          actions={modalContent.actions}
+        />
+      )}
     </ScrollView>
   );
 };

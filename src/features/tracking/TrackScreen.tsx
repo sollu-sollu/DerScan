@@ -7,46 +7,140 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { LineChart } from 'react-native-gifted-charts';
 
-import { PrimaryButton, InfoCard } from '../../components';
+import { PrimaryButton, InfoCard, CustomModal } from '../../components';
 import { useTheme } from '../../theme';
-import { getScanHistory } from '../../services/firestore';
+import { getScanHistory, getUserSeries, getScansBySeries, deleteSeries } from '../../services/firestore';
 import type { AnalysisResult } from '../../services/api';
+import { useProgressStore } from '../../store/progressStore';
 
 type ScanItem = AnalysisResult & { id: string };
 
 export default function TrackScreen() {
   const navigation = useNavigation<any>();
   const { colors, spacing, borderRadius, typography, isDarkMode, shadows } = useTheme();
+  const { activeSeriesId, setActiveSeriesId } = useProgressStore();
 
   const [history, setHistory] = useState<ScanItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [allSeries, setAllSeries] = useState<{id: string, name: string}[]>([]);
+  const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(activeSeriesId);
+  const [tempScans, setTempScans] = useState<ScanItem[]>([]);
+  
+  const [mgmtModalVisible, setMgmtModalVisible] = useState(false);
+  const [mgmtModalContent, setMgmtModalContent] = useState<{
+    title: string;
+    subtitle: string;
+    icon: string;
+    iconColor?: string;
+    actions: any[];
+  } | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const seriesList = await getUserSeries();
+      setAllSeries(seriesList);
+      
+      // Default selection if none
+      if (selectedSeriesId === null && seriesList.length > 0) {
+        setSelectedSeriesId(seriesList[0].id);
+      }
+
+      if (selectedSeriesId) {
+        const seriesData = await getScansBySeries(selectedSeriesId);
+        setHistory(seriesData);
+      }
+
+      const fullHistory = await getScanHistory();
+      setTempScans(fullHistory.filter(s => s.isTemp || s.seriesId === 'TEMP'));
+    } catch (e) {
+      console.error('Failed to load tracking data:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
-      let mounted = true;
-      const load = async () => {
-        setLoading(true);
-        try {
-          const data = await getScanHistory();
-          if (mounted) setHistory(data);
-        } catch (e) {
-          console.error('Failed to load history:', e);
-        } finally {
-          if (mounted) setLoading(false);
-        }
-      };
       load();
-      return () => { mounted = false; };
-    }, [])
+    }, [selectedSeriesId, activeSeriesId])
   );
 
-  // Derived data
+  const handleSeriesLongPress = (series: {id: string, name: string}) => {
+    const isActive = activeSeriesId === series.id;
+    
+    setMgmtModalContent({
+      title: `Manage ${series.name}`,
+      subtitle: `Choose an action for this healing journey.${isActive ? ' (Currently Active)' : ''}`,
+      icon: 'cog-outline',
+      actions: [
+        { 
+          label: 'Set as Active Journey', 
+          onPress: () => {
+            setActiveSeriesId(series.id);
+            setMgmtModalVisible(false);
+            // Optional: Show a subtle success toast or just rely on the UI update
+          },
+          variant: 'primary'
+        },
+        { 
+          label: 'Delete Everything', 
+          onPress: () => confirmDelete(series),
+          variant: 'destructive' 
+        }
+      ]
+    });
+    setMgmtModalVisible(true);
+  };
+
+  const confirmDelete = (series: {id: string, name: string}) => {
+    setMgmtModalContent({
+      title: 'Delete Journey?',
+      subtitle: `This will permanently delete ALL ${history.length} scans for "${series.name}". This action cannot be undone.`,
+      icon: 'delete-forever',
+      iconColor: colors.error,
+      actions: [
+        { 
+          label: 'Permanently Delete', 
+          variant: 'destructive',
+          onPress: async () => {
+            try {
+              setMgmtModalVisible(false);
+              await deleteSeries(series.id);
+              if (activeSeriesId === series.id) setActiveSeriesId(null);
+              setSelectedSeriesId(null);
+              load();
+            } catch (e) {
+              setMgmtModalContent({
+                title: 'Error',
+                subtitle: 'Could not delete the journey.',
+                icon: 'alert-circle',
+                actions: []
+              });
+              setMgmtModalVisible(true);
+            }
+          }
+        }
+      ]
+    });
+  };
+
+  const handleTempScanClick = (scan: ScanItem) => {
+    navigation.navigate('Results', {
+      analysisData: scan,
+      scanId: scan.id,
+      imageUri: scan.image_uri,
+    });
+  };
+
+  // Recovery calculation... Same as before
   const baseline = history.length > 0 ? history[history.length - 1] : null;
   const latest = history.length > 0 ? history[0] : null;
   const hasTwoScans = history.length >= 2;
@@ -155,9 +249,61 @@ export default function TrackScreen() {
     actionButtons: { flexDirection: 'row' },
     scanCountBadge: {
       backgroundColor: colors.primary, paddingHorizontal: 10,
-      paddingVertical: 4, borderRadius: 12, marginBottom: spacing.lg, alignSelf: 'center',
+      paddingVertical: 4, borderRadius: 12, marginBottom: spacing.lg, alignSelf: 'flex-start',
     },
     scanCountText: { ...typography.caption, fontWeight: '600', color: colors.white },
+    seriesSelector: {
+      flexDirection: 'row',
+      marginBottom: spacing.lg,
+      gap: spacing.sm,
+    },
+    seriesItem: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: 8,
+      borderRadius: 12,
+      backgroundColor: colors.cardBackground,
+      borderWidth: 1,
+      borderColor: colors.border,
+      minWidth: 80,
+      alignItems: 'center',
+    },
+    seriesItemActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    seriesText: {
+      ...typography.caption,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    seriesTextActive: {
+      color: colors.white,
+    },
+    tempSectionTitle: {
+      ...typography.body,
+      fontWeight: '700',
+      color: colors.text,
+      marginTop: spacing.xl,
+      marginBottom: spacing.md,
+    },
+    tempGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.md,
+    },
+    tempItem: {
+      width: (320 - spacing.md) / 2, // Approximate for grid
+      backgroundColor: colors.cardBackground,
+      borderRadius: borderRadius.md,
+      padding: spacing.sm,
+      ...shadows.sm,
+    },
+    tempTitle: {
+      ...typography.caption,
+      fontWeight: '700',
+      color: colors.text,
+      marginTop: 4,
+    },
   });
 
   if (loading) {
@@ -203,10 +349,44 @@ export default function TrackScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Journey Selector */}
+        {allSeries.length > 0 && (
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            contentContainerStyle={styles.seriesSelector}
+          >
+            {allSeries.map(series => (
+              <TouchableOpacity
+                key={series.id}
+                style={[
+                  styles.seriesItem,
+                  selectedSeriesId === series.id && styles.seriesItemActive,
+                  activeSeriesId === series.id && { borderStyle: 'dotted', borderWidth: 2 }
+                ]}
+                onPress={() => setSelectedSeriesId(series.id)}
+                onLongPress={() => handleSeriesLongPress(series)}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  {activeSeriesId === series.id && <Icon name="star" size={12} color={colors.white} />}
+                  <Text style={[
+                    styles.seriesText,
+                    selectedSeriesId === series.id && styles.seriesTextActive
+                  ]}>
+                    {series.name}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
         {/* Scans count */}
-        <View style={styles.scanCountBadge}>
-          <Text style={styles.scanCountText}>{history.length} Scan{history.length !== 1 ? 's' : ''} Recorded</Text>
-        </View>
+        {selectedSeriesId && history.length > 0 && (
+          <View style={styles.scanCountBadge}>
+            <Text style={styles.scanCountText}>{history.length} Scan{history.length !== 1 ? 's' : ''} in this Journey</Text>
+          </View>
+        )}
 
         {/* Monthly Comparison */}
         {hasTwoScans && (
@@ -330,7 +510,40 @@ export default function TrackScreen() {
             style={{ flex: 1, marginLeft: 8 }}
           />
         </View>
+
+        {/* Temp/Other Scans Section */}
+        {tempScans.length > 0 && (
+          <View>
+            <Text style={styles.tempSectionTitle}>Other Saved Scans</Text>
+            <View style={styles.tempGrid}>
+              {tempScans.map(scan => (
+                <TouchableOpacity 
+                  key={scan.id} 
+                  style={styles.tempItem}
+                  onPress={() => handleTempScanClick(scan)}
+                >
+                  <Image source={{ uri: scan.image_uri }} style={{ width: '100%', height: 100, borderRadius: 8 }} />
+                  <Text style={styles.tempTitle} numberOfLines={1}>{scan.condition_name}</Text>
+                  <Text style={styles.imageDate}>{formatDate(scan.timestamp)}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
       </ScrollView>
+
+      {/* Journey Management Modal */}
+      {mgmtModalContent && (
+        <CustomModal
+          visible={mgmtModalVisible}
+          onClose={() => setMgmtModalVisible(false)}
+          title={mgmtModalContent.title}
+          subtitle={mgmtModalContent.subtitle}
+          icon={mgmtModalContent.icon}
+          iconColor={mgmtModalContent.iconColor}
+          actions={mgmtModalContent.actions}
+        />
+      )}
     </SafeAreaView>
   );
 }

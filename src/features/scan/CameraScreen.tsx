@@ -23,6 +23,8 @@ import { useTheme } from '../../theme';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { analyzeSkinImage, AnalysisResult } from '../../services/api';
 import { saveScanResult } from '../../services/firestore';
+import { uploadImageToCloudinary } from '../../services/cloudinaryService';
+import { CustomModal } from '../../components';
 
 type CameraRouteProp = RouteProp<RootStackParamList, 'Camera'>;
 
@@ -43,6 +45,14 @@ export default function CameraScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('Align & Hold Steady...');
+
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalContent, setModalContent] = useState<{
+    title: string;
+    subtitle: string;
+    icon: string;
+    iconColor?: string;
+  } | null>(null);
 
   // Effect to Check/Request Permission
   useEffect(() => {
@@ -71,7 +81,13 @@ export default function CameraScreen() {
       if (result.didCancel) return;
       
       if (result.errorCode) {
-        Alert.alert('Error', result.errorMessage || 'Failed to open gallery');
+        setModalContent({
+          title: 'Gallery Error',
+          subtitle: result.errorMessage || 'Failed to open gallery. Please check permissions.',
+          icon: 'image-remove',
+          iconColor: colors.error,
+        });
+        setModalVisible(true);
         return;
       }
 
@@ -79,7 +95,13 @@ export default function CameraScreen() {
         handleAnalysis(result.assets[0].uri);
       }
     } catch (err: any) {
-      Alert.alert('Error', `Unexpected Error (Picker): ${err.message || 'Unknown'}`);
+      setModalContent({
+        title: 'Error',
+        subtitle: `Unexpected Error: ${err.message || 'Unknown'}`,
+        icon: 'alert-circle-outline',
+        iconColor: colors.error,
+      });
+      setModalVisible(true);
     }
   };
 
@@ -101,7 +123,13 @@ export default function CameraScreen() {
     } catch (e: any) {
       setIsProcessing(false);
       setStatusText('Align & Hold Steady...');
-      Alert.alert('Capture Error', e.message || 'Failed to capture photo');
+      setModalContent({
+        title: 'Capture Error',
+        subtitle: e.message || 'Failed to capture photo. Please try again.',
+        icon: 'camera-off',
+        iconColor: colors.error,
+      });
+      setModalVisible(true);
     }
   };
 
@@ -124,43 +152,54 @@ export default function CameraScreen() {
       setStatusText('Analyzing skin condition...');
 
       // Call the AI backend with a real URI if provided, otherwise placeholder
-      // (Usually camera would provide a URI here too)
-      const imageUri = uri || 'placeholder_uri';
-      const result: AnalysisResult = await analyzeSkinImage(imageUri);
+      const localImageUri = uri || 'placeholder_uri';
+      const result: AnalysisResult = await analyzeSkinImage(localImageUri);
 
       clearInterval(progressInterval);
-      setProgress(95);
-      setStatusText('Saving results...');
+      setProgress(75);
+      setStatusText('Saving image to cloud...');
 
-      // Save to Firestore
-      try {
-        result.image_uri = imageUri;
-        await saveScanResult(result);
-      } catch (firestoreError) {
-        console.warn('Could not save to Firestore (offline?):', firestoreError);
-        // Continue anyway — results still show in the app
+      // Upload the image to Cloudinary for permanent storage
+      let finalImageUri = localImageUri;
+      if (localImageUri !== 'placeholder_uri') {
+        try {
+          finalImageUri = await uploadImageToCloudinary(localImageUri);
+          console.log('Image permanently hosted at:', finalImageUri);
+        } catch (uploadError) {
+          console.warn('Cloudinary upload failed, falling back to local cache URI:', uploadError);
+          // Keep finalImageUri as localImageUri so the user can at least see it in this session
+        }
       }
 
+      setProgress(95);
+      setStatusText('Processing analysis...');
+
+      // We no longer save immediately here. 
+      // We pass the result to ResultsScreen so the user can choose 
+      // where to save it (Current Journey, New Journey, or Temp).
+      
       setProgress(100);
       setStatusText('Analysis complete!');
 
-      // Navigate to Results with the analysis data
+      // Navigate to Results with the analysis data and permanent URI
       setTimeout(() => {
         navigation.replace('Results', {
           analysisData: result,
-          scanId: result.scan_id,
-          imageUri: imageUri,
+          scanId: result.scan_id || `SCAN_${Date.now()}`,
+          imageUri: finalImageUri,
         });
       }, 500);
     } catch (error: any) {
       setIsProcessing(false);
       setProgress(0);
       setStatusText('Align & Hold Steady...');
-      Alert.alert(
-        'Analysis Failed',
-        error.message || 'Could not connect to the AI server. Please try again.',
-        [{ text: 'OK' }],
-      );
+      setModalContent({
+        title: 'Analysis Failed',
+        subtitle: error.message || 'Could not connect to the AI server. Please check your internet connection.',
+        icon: 'server-network-off',
+        iconColor: colors.error,
+      });
+      setModalVisible(true);
     }
   };
 
@@ -421,6 +460,18 @@ export default function CameraScreen() {
           </View>
         </SafeAreaView>
       </View>
+
+      {/* Shared Custom Modal */}
+      {modalContent && (
+        <CustomModal
+          visible={modalVisible}
+          onClose={() => setModalVisible(false)}
+          title={modalContent.title}
+          subtitle={modalContent.subtitle}
+          icon={modalContent.icon}
+          iconColor={modalContent.iconColor}
+        />
+      )}
     </View>
   );
 }
