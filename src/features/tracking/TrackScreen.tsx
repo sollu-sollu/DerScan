@@ -498,7 +498,13 @@ export default function TrackScreen() {
         <View style={styles.actionButtons}>
           <PrimaryButton
             title="Full History"
-            onPress={() => navigation.navigate('Scan')}
+            onPress={() => {
+              const selectedName = allSeries.find(s => s.id === selectedSeriesId)?.name || 'Journey';
+              navigation.navigate('History', { 
+                seriesId: selectedSeriesId, 
+                seriesName: selectedName 
+              });
+            }}
             variant="outline"
             icon={<Icon name="history" size={18} color={colors.primary} />}
             style={{ flex: 1, marginRight: 8 }}

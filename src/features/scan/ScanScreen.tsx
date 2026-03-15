@@ -402,8 +402,8 @@ export default function ScanScreen() {
         <View style={styles.recentSection}>
           <View style={styles.recentHeader}>
             <Text style={styles.recentTitle}>Recent Scans</Text>
-            {history.length > 0 && (
-              <TouchableOpacity>
+            {history.length > 5 && (
+              <TouchableOpacity onPress={() => navigation.navigate('History')}>
                 <Text style={styles.seeAll}>See All</Text>
               </TouchableOpacity>
             )}
@@ -416,7 +416,7 @@ export default function ScanScreen() {
             </View>
           ) : history.length > 0 ? (
             <View style={styles.historyList}>
-              {history.map((item) => (
+              {history.slice(0, 5).map((item) => (
                 <TouchableOpacity 
                   key={item.id} 
                   style={styles.historyItem}

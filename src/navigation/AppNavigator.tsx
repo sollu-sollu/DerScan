@@ -12,6 +12,7 @@ import CareScreen from '../features/care/CareScreen';
 import ProfileScreen from '../features/profile/ProfileScreen';
 import ResultsScreen from '../features/results/ResultsScreen';
 import CameraScreen from '../features/scan/CameraScreen';
+import HistoryScreen from '../features/scan/HistoryScreen';
 import LoginScreen from '../features/auth/LoginScreen';
 import SignUpScreen from '../features/auth/SignUpScreen';
 
@@ -26,6 +27,7 @@ export type RootStackParamList = {
   MainTabs: undefined;
   Camera: { selectedImage?: string };
   Results: { analysisData?: AnalysisResult; scanId?: string; imageUri?: string };
+  History: undefined;
   Login: undefined;
   SignUp: undefined;
 };
@@ -164,6 +166,11 @@ export default function AppNavigator() {
               name="Results"
               component={ResultsScreen}
               options={{ animation: 'fade' }}
+            />
+            <Stack.Screen
+              name="History"
+              component={HistoryScreen}
+              options={{ animation: 'slide_from_right' }}
             />
           </>
         ) : (

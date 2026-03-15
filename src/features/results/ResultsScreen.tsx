@@ -12,8 +12,9 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { PrimaryButton, InfoCard, CustomModal } from '../../components';
+import { PrimaryButton, InfoCard, CustomModal, ChecklistItem } from '../../components';
 import { useTheme } from '../../theme';
+import { safeIcon } from '../../utils/safeIcon';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { generateAndSharePDF } from '../../services/pdfService';
 import { useAuthStore } from '../../store/authStore';
@@ -452,6 +453,11 @@ export default function ResultsScreen() {
       fontSize: 11,
       marginTop: 2,
     },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing.sm,
+    },
   });
 
   return (
@@ -580,6 +586,57 @@ export default function ResultsScreen() {
               </View>
             ))}
           </InfoCard>
+        )}
+
+        {/* Preliminary Treatment Plan */}
+        {(analysisData?.daily_routine?.length || 0) > 0 && (
+          <View style={[styles.clinicalSection, { marginTop: spacing.lg }]}>
+            <View style={styles.sectionHeader}>
+              <Icon name="clipboard-pulse-outline" size={22} color={colors.primary} />
+              <Text style={[styles.clinicalTitle, { marginLeft: spacing.xs, marginBottom: 0 }]}>
+                Recommended Treatment Plan
+              </Text>
+            </View>
+            
+            <View style={{ marginTop: spacing.md }}>
+              <Text style={[styles.descriptionTitle, { fontSize: 13 }]}>Daily Routine</Text>
+              <InfoCard style={{ marginTop: spacing.xs, paddingVertical: spacing.xs }}>
+                {analysisData?.daily_routine?.map((item, index) => (
+                  <ChecklistItem
+                    key={index}
+                    title={item.title}
+                    subtitle={item.subtitle}
+                    time={item.time}
+                    checked={false}
+                    onToggle={() => {}}
+                    icon={item.icon || 'medical-bag'}
+                    iconColor={colors.primary}
+                  />
+                ))}
+              </InfoCard>
+            </View>
+
+            {(analysisData?.lifestyle_adjustments?.length || 0) > 0 && (
+              <View style={{ marginTop: spacing.lg }}>
+                <Text style={[styles.descriptionTitle, { fontSize: 13 }]}>Lifestyle Tips</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs }}>
+                  {analysisData?.lifestyle_adjustments?.map((item, index) => (
+                    <View key={index} style={{ 
+                      backgroundColor: colors.cardBackground, 
+                      padding: spacing.md, 
+                      borderRadius: borderRadius.md,
+                      flex: 1, minWidth: '45%',
+                      borderWidth: 1, borderColor: colors.border
+                    }}>
+                      <Icon name={safeIcon(item.icon, 'star')} size={20} color={colors.primary} style={{ marginBottom: 4 }} />
+                      <Text style={{ ...typography.bodySmall, fontWeight: '700', color: colors.text }}>{item.title}</Text>
+                      <Text style={{ ...typography.caption, color: colors.textSecondary }}>{item.subtitle}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+          </View>
         )}
 
         {/* When to See Doctor */}

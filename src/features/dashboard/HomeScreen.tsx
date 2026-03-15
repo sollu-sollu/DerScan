@@ -11,11 +11,12 @@ import {
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Geolocation from '@react-native-community/geolocation';
 import { useTheme } from '../../theme';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useProgressStore } from '../../store/progressStore';
 import { useAuthStore } from '../../store/authStore';
-import { getLatestScan } from '../../services/firestore';
+import { getLatestScan, getScansBySeries } from '../../services/firestore';
 import type { RoutineItem } from '../../services/api';
 
 interface ChecklistItemData {
@@ -45,13 +46,82 @@ export default function HomeScreen() {
   const [checklist, setChecklist] = useState<ChecklistItemData[]>(DEFAULT_CHECKLIST);
   const [latestCondition, setLatestCondition] = useState<string | null>(null);
   const [isRealData, setIsRealData] = useState(false);
+  const [totalScansInSeries, setTotalScansInSeries] = useState<number>(0);
+  const [recoveryPercent, setRecoveryPercent] = useState<number>(0);
+  const [weather, setWeather] = useState({
+    temp: 28,
+    condition: 'Loading...',
+    uvIndex: 0,
+    uvAdvice: 'Fetching data...',
+    icon: 'weather-partly-cloudy' as string,
+    loading: true
+  });
 
-  // Load AI-generated routine from Firestore
+  // Load data on focus
   useFocusEffect(
     useCallback(() => {
       loadRoutine();
+      loadWeather();
     }, [activeSeriesId])
   );
+
+  const loadWeather = async () => {
+    Geolocation.getCurrentPosition(
+      (position) => {
+        fetchWeatherData(position.coords.latitude, position.coords.longitude);
+      },
+      (error) => {
+        console.error('Weather Geolocation Error:', error);
+        // Fallback to default location (Chennai)
+        fetchWeatherData(13.0827, 80.2707);
+      },
+      { enableHighAccuracy: false, timeout: 10000 }
+    );
+  };
+
+  const fetchWeatherData = async (lat: number, lng: number) => {
+    try {
+      // Using Open-Meteo (Free, No Key required, Very reliable)
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code&daily=uv_index_max&timezone=auto`;
+      
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.current) {
+        const temp = Math.round(data.current.temperature_2m);
+        const code = data.current.weather_code;
+        const uv = data.daily.uv_index_max[0];
+        
+        let condition = 'Clear';
+        let icon = 'weather-sunny';
+        
+        // Simple WMO Code mapping
+        if (code === 0) { condition = 'Clear Sky'; icon = 'weather-sunny'; }
+        else if (code <= 3) { condition = 'Partly Cloudy'; icon = 'weather-partly-cloudy'; }
+        else if (code <= 48) { condition = 'Foggy'; icon = 'weather-fog'; }
+        else if (code <= 67) { condition = 'Rainy'; icon = 'weather-rainy'; }
+        else if (code <= 77) { condition = 'Snowy'; icon = 'weather-snowy'; }
+        else { condition = 'Stormy'; icon = 'weather-lightning'; }
+
+        let advice = 'Safe for now';
+        if (uv >= 8) advice = 'SPF 50+ Required';
+        else if (uv >= 5) advice = 'Use Sunscreen';
+        else if (uv >= 3) advice = 'Wear Sunglasses';
+
+        setWeather({
+          temp,
+          condition,
+          uvIndex: uv,
+          uvAdvice: advice,
+          icon,
+          loading: false
+        });
+      }
+    } catch (error) {
+      console.error('Weather Fetch Error:', error);
+      setWeather(prev => ({ ...prev, loading: false, condition: 'Weather unavailable' }));
+    }
+  };
 
   const loadRoutine = async () => {
     try {
@@ -70,6 +140,41 @@ export default function HomeScreen() {
         );
         setChecklist(aiRoutine);
         setIsRealData(true);
+
+        // Fetch full active series length for Tracking Stats
+        if (latest.seriesId) {
+          const seriesScans = await getScansBySeries(latest.seriesId);
+          setTotalScansInSeries(seriesScans.length);
+
+          if (seriesScans.length > 1) {
+            // Calculate true recovery: (baseline_severity - latest_severity) / baseline_severity * 100
+            // Note: seriesScans is sorted descending (newest first).
+            const latestScan = seriesScans[0];
+            const baselineScan = seriesScans[seriesScans.length - 1];
+            
+            if (baselineScan.severity && latestScan.severity) {
+              const baseSev = Number(baselineScan.severity);
+              const curSev = Number(latestScan.severity);
+              
+              if (baseSev > 0) {
+                // If it improved (current < base), that's a positive recovery.
+                // If it worsened, floor at 0%.
+                const improvement = Math.max(0, baseSev - curSev);
+                const percent = Math.round((improvement / baseSev) * 100);
+                setRecoveryPercent(percent);
+              } else {
+                setRecoveryPercent(100); // was already 0 severity? Fully recovered.
+              }
+            }
+          } else {
+            // Just one scan, no recovery yet
+            setRecoveryPercent(0);
+          }
+        } else {
+          setTotalScansInSeries(1); // just the current one
+          setRecoveryPercent(0);
+        }
+
       } else {
         setIsRealData(false);
       }
@@ -373,9 +478,9 @@ export default function HomeScreen() {
             </View>
           )}
         </TouchableOpacity>
-        <TouchableOpacity style={styles.notificationBtn}>
+        {/* <TouchableOpacity style={styles.notificationBtn}>
           <Icon name="bell-outline" size={24} color={colors.white} />
-        </TouchableOpacity>
+        </TouchableOpacity> */}
       </View>
 
       <ScrollView 
@@ -400,18 +505,29 @@ export default function HomeScreen() {
         {/* Weather/UV Card */}
         <View style={styles.weatherCard}>
           <View style={styles.weatherLeft}>
-            <Icon name="weather-sunny" size={40} color="#FFD700" />
+            {weather.loading ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <Icon name={weather.icon} size={40} color="#FFD700" />
+            )}
             <View style={styles.weatherInfo}>
-              <Text style={styles.temperature}>28°C</Text>
-              <Text style={styles.weatherDesc}>Sunny Day</Text>
+              <Text style={styles.temperature}>
+                {weather.loading ? '--' : `${weather.temp}°C`}
+              </Text>
+              <Text style={styles.weatherDesc}>{weather.condition}</Text>
             </View>
           </View>
           <View style={styles.uvContainer}>
             <Text style={styles.uvLabel}>UV Index</Text>
-            <View style={styles.uvBadge}>
-              <Text style={styles.uvValue}>High</Text>
+            <View style={[
+              styles.uvBadge, 
+              { backgroundColor: weather.uvIndex >= 8 ? colors.error : weather.uvIndex >= 5 ? colors.warning : colors.success }
+            ]}>
+              <Text style={styles.uvValue}>
+                {weather.loading ? '--' : weather.uvIndex >= 8 ? 'Very High' : weather.uvIndex >= 5 ? 'High' : weather.uvIndex >= 3 ? 'Moderate' : 'Low'}
+              </Text>
             </View>
-            <Text style={styles.uvAdvice}>Use SPF 50+</Text>
+            <Text style={styles.uvAdvice}>{weather.uvAdvice}</Text>
           </View>
         </View>
 
@@ -464,21 +580,21 @@ export default function HomeScreen() {
 
         {/* Quick Stats */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Stats</Text>
+          <Text style={styles.sectionTitle}>Tracking Stats</Text>
           <View style={styles.statsRow}>
             <View style={styles.statCard}>
-              <Icon name="water" size={28} color={colors.secondary} />
-              <Text style={styles.statValue}>6/8</Text>
-              <Text style={styles.statLabel}>Glasses</Text>
+              <Icon name="check-circle-outline" size={28} color={colors.secondary} />
+              <Text style={styles.statValue}>{completedCount}/{checklist.length}</Text>
+              <Text style={styles.statLabel}>Routine</Text>
             </View>
             <View style={styles.statCard}>
-              <Icon name="fire" size={28} color={colors.warning} />
-              <Text style={styles.statValue}>7</Text>
-              <Text style={styles.statLabel}>Day Streak</Text>
+              <Icon name="camera-iris" size={28} color={colors.warning} />
+              <Text style={styles.statValue}>{isRealData ? totalScansInSeries : 0}</Text>
+              <Text style={styles.statLabel}>Scans Tracked</Text>
             </View>
             <View style={styles.statCard}>
               <Icon name="chart-line" size={28} color={colors.success} />
-              <Text style={styles.statValue}>85%</Text>
+              <Text style={styles.statValue}>{isRealData ? `${recoveryPercent}%` : '0%'}</Text>
               <Text style={styles.statLabel}>Recovery</Text>
             </View>
           </View>

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../theme';
+import { safeIcon } from '../utils/safeIcon';
 
 interface ChecklistItemProps {
   title: string;
@@ -9,6 +10,7 @@ interface ChecklistItemProps {
   time?: string;
   checked: boolean;
   onToggle: () => void;
+  onTimePress?: () => void;
   icon?: string;
   iconColor?: string;
   style?: ViewStyle;
@@ -20,12 +22,14 @@ export function ChecklistItem({
   time,
   checked,
   onToggle,
+  onTimePress,
   icon,
   iconColor,
   style,
 }: ChecklistItemProps) {
   const { colors } = useTheme();
   const activeIconColor = iconColor || colors.primary;
+  const validIconName = safeIcon(icon);
 
   return (
     <TouchableOpacity
@@ -36,7 +40,7 @@ export function ChecklistItem({
       <View style={styles.leftSection}>
         {icon && (
           <View style={[styles.iconBg, { backgroundColor: `${activeIconColor}15` }]}>
-            <Icon name={icon} size={20} color={activeIconColor} />
+            <Icon name={validIconName} size={20} color={activeIconColor} />
           </View>
         )}
         <View style={styles.textContainer}>
@@ -59,7 +63,11 @@ export function ChecklistItem({
         </View>
       </View>
       <View style={styles.rightSection}>
-        {time && <Text style={[styles.time, { color: colors.textLight }]}>{time}</Text>}
+        {time && (
+          <TouchableOpacity onPress={onTimePress} disabled={!onTimePress} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+            <Text style={[styles.time, { color: colors.primary, fontWeight: '600' }]}>{time}</Text>
+          </TouchableOpacity>
+        )}
         <View style={[
           styles.checkbox, 
           { borderColor: colors.secondary },

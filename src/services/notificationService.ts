@@ -65,9 +65,19 @@ export function scheduleRoutineReminders(routine: ReminderStep[]) {
  * Cancel all reminders.
  */
 export function cancelAllReminders() {
-  storage.delete(REMINDERS_KEY);
-  storage.set(REMINDERS_ENABLED_KEY, false);
-  console.log('All reminders cancelled');
+  try {
+    if (storage && typeof storage.delete === 'function') {
+      storage.delete(REMINDERS_KEY);
+    } else if (storage) {
+      storage.set(REMINDERS_KEY, '[]');
+    }
+    if (storage) {
+      storage.set(REMINDERS_ENABLED_KEY, false);
+    }
+    console.log('All reminders cancelled safely');
+  } catch (error) {
+    console.error('Failed to cancel reminders:', error);
+  }
 }
 
 /**

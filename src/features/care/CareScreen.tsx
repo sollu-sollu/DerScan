@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,9 +16,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Geolocation from '@react-native-community/geolocation';
 
-import { InfoCard, CustomModal } from '../../components';
-import LeafletMapView from '../../components/MapView';
+import { InfoCard, CustomModal, NativeMapView } from '../../components';
 import { useTheme } from '../../theme';
+import { MapType } from 'react-native-maps';
+
+const GOOGLE_MAPS_API_KEY = 'AIzaSyDdyZqQW6Bs2YH3o2sH-yK97c9gQx_6Jow';
 
 interface NearbyPlace {
   id: string;
@@ -49,17 +51,31 @@ export default function CareScreen() {
   const [loading, setLoading] = useState(true);
   const [userLat, setUserLat] = useState<number | null>(null);
   const [userLng, setUserLng] = useState<number | null>(null);
+  // Real GPS position — never overwritten by search, used for routing origin
+  const [gpsLat, setGpsLat] = useState<number | null>(null);
+  const [gpsLng, setGpsLng] = useState<number | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [activeRoute, setActiveRoute] = useState<[number, number][] | undefined>();
   const [isRoutingId, setIsRoutingId] = useState<string | null>(null);
+  const [radius, setRadius] = useState(5000); // Default 5km
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [placesLoading, setPlacesLoading] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
+  const [mapType, setMapType] = useState<MapType>('standard');
+  const [is3D, setIs3D] = useState(false);
+  const [showStylePicker, setShowStylePicker] = useState(false);
   const [modalContent, setModalContent] = useState<{
     title: string;
     subtitle: string;
     icon: string;
     iconColor?: string;
   } | null>(null);
+
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const radiusTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [searchedLocation, setSearchedLocation] = useState<{ name: string; lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     requestLocationAndFetch();
@@ -91,6 +107,8 @@ export default function CareScreen() {
           const { latitude, longitude } = position.coords;
           setUserLat(latitude);
           setUserLng(longitude);
+          setGpsLat(latitude);
+          setGpsLng(longitude);
           fetchNearbyPlaces(latitude, longitude);
         },
         (error) => {
@@ -101,6 +119,8 @@ export default function CareScreen() {
           const defaultLng = 80.2707;
           setUserLat(defaultLat);
           setUserLng(defaultLng);
+          setGpsLat(defaultLat);
+          setGpsLng(defaultLng);
           fetchNearbyPlaces(defaultLat, defaultLng);
         },
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
@@ -111,89 +131,204 @@ export default function CareScreen() {
     }
   };
 
-  const fetchNearbyPlaces = async (lat: number, lng: number) => {
+  const fetchNearbyPlaces = async (lat: number, lng: number, currentRadius: number = radius, customQuery?: string) => {
     try {
-      // Overpass API query for hospitals, clinics, and dermatologists within 5km
-      const radius = 5000; // meters
-      const query = `
-        [out:json][timeout:25];
-        (
-          node["amenity"="hospital"](around:${radius},${lat},${lng});
-          node["amenity"="clinic"](around:${radius},${lat},${lng});
-          node["amenity"="doctors"](around:${radius},${lat},${lng});
-          node["healthcare"="doctor"](around:${radius},${lat},${lng});
-          node["healthcare"="clinic"](around:${radius},${lat},${lng});
-          node["healthcare:speciality"="dermatology"](around:${radius},${lat},${lng});
-        );
-        out body 50;
-      `;
+      setPlacesLoading(true);
+      const url = 'https://places.googleapis.com/v1/places:searchText';
+      
+      const textQuery = customQuery || [
+        'Dermatologist', 'Skin clinic', 'Skin doctor', 'Skin specialist',
+        'Best dermatology clinic', 'Private dermatologist', 'Skin & Hair clinic',
+        'Medical spa', 'Cosmetic clinic', 'Hair transplant clinic', 'Dermatology pharmacy'
+      ].join(' ');
 
-      const response = await fetch('https://overpass-api.de/api/interpreter', {
+      const response = await fetch(url, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json'
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.shortFormattedAddress'
         },
-        body: `data=${encodeURIComponent(query)}`,
+        body: JSON.stringify({
+          textQuery,
+          locationBias: {
+            circle: {
+              center: { latitude: lat, longitude: lng },
+              radius: currentRadius
+            }
+          }
+        })
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error(`Overpass API returned status: ${response.status}`);
+        throw new Error(data.error?.message || 'Places API (New) Error');
       }
 
-      const rawText = await response.text();
-      let data;
-      try {
-        data = JSON.parse(rawText);
-      } catch (parseError) {
-        throw new Error('Failed to parse Overpass API response as JSON');
-      }
+      // Strict Keyword Whitelist for filtering out "Noise" (General hospitals without skin focus)
+      const whitelist = [
+        'derma', 'skin', 'clinic', 'specialist', 'hair', 'cosmetic', 'spa', 'pharmacy', 'care'
+      ];
 
-      const results: NearbyPlace[] = (data.elements || [])
-        .filter((el: any) => el.tags?.name)
-        .map((el: any) => ({
-          id: String(el.id),
-          name: el.tags.name,
-          type: el.tags.amenity || el.tags.healthcare || 'clinic',
-          lat: el.lat,
-          lng: el.lon,
-          distance: getDistance(lat, lng, el.lat, el.lon),
-          address: el.tags['addr:full'] || el.tags['addr:street'] || '',
-          phone: el.tags.phone || el.tags['contact:phone'] || '',
+      const results: NearbyPlace[] = (data.places || [])
+        .map((place: any) => ({
+          id: place.id,
+          name: place.displayName?.text || 'Unknown Clinic',
+          type: place.types?.[0]?.replace(/_/g, ' ') || 'clinic',
+          lat: place.location.latitude,
+          lng: place.location.longitude,
+          distance: getDistance(lat, lng, place.location.latitude, place.location.longitude),
+          address: place.shortFormattedAddress || place.formattedAddress || '',
+          phone: '', 
         }))
-        .sort((a: NearbyPlace, b: NearbyPlace) => a.distance - b.distance)
-        .slice(0, 20);
+        .filter((place: any) => {
+          const lowerName = place.name.toLowerCase();
+          const lowerType = place.type.toLowerCase();
+          const inRadius = place.distance <= (currentRadius + 100) / 1000; // Small buffer
+          
+          // Must match a skin/specialty keyword OR be a clinic/pharmacy explicitly
+          const matchWhitelist = whitelist.some(word => lowerName.includes(word) || lowerType.includes(word));
+          
+          return inRadius && matchWhitelist;
+        })
+        .sort((a: NearbyPlace, b: NearbyPlace) => a.distance - b.distance);
 
-      // If Overpass returns nothing 
-      if (results.length === 0) {
-         setPlaces([{
-            id: 'demo-1', name: 'DermaCare Institute', type: 'clinic', 
-            lat: lat + 0.01, lng: lng + 0.01, distance: 1.2, 
-            address: '123 Health Ave, Medical District', phone: '+1 234 567 890'
-         },
-         {
-            id: 'demo-2', name: 'Skin Health Center', type: 'clinic', 
-            lat: lat - 0.01, lng: lng - 0.01, distance: 2.5, 
-            address: '456 Wellness Blvd, Downtown', phone: '+1 987 654 321'
-         }]);
-      } else {
-         setPlaces(results);
-      }
+      setPlaces(results);
+      return results;
     } catch (e: any) {
-      console.error('Overpass API error:', e.message);
-      // Fallback to mock data so the map still works and doesn't show blank
-      setPlaces([{
-          id: 'error-1', name: 'DermaCare Institute', type: 'clinic', 
-          lat: lat + 0.01, lng: lng + 0.01, distance: 1.2, 
-          address: '123 Health Ave, Medical District', phone: '+1 234 567 890'
-      },
-      {
-          id: 'error-2', name: 'Skin Health Center', type: 'clinic', 
-          lat: lat - 0.01, lng: lng - 0.01, distance: 2.5, 
-          address: '456 Wellness Blvd, Downtown', phone: '+1 987 654 321'
-      }]);
+      console.error('Map Data Error:', e.message);
+      setLocationError('Service adjustment in progress. Testing API connectivity...');
     } finally {
-      setLoading(false);
+      setPlacesLoading(false);
+      setLoading(false); // Ensure initial spinner is gone
+    }
+  };
+
+  const fetchSuggestions = async (input: string) => {
+    if (input.length < 3) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    try {
+      // Using Places API (New) Autocomplete endpoint
+      const url = 'https://places.googleapis.com/v1/places:autocomplete';
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+        },
+        body: JSON.stringify({
+          input,
+          locationBias: {
+            circle: {
+              center: { latitude: userLat || 13.0827, longitude: userLng || 80.2707 },
+              radius: 50000 // Bias towards current area
+            }
+          }
+        })
+      });
+      const data = await response.json();
+
+      if (data.suggestions) {
+        setSuggestions(data.suggestions);
+        setShowSuggestions(true);
+      }
+    } catch (e) {
+      console.error('Autocomplete Error:', e);
+    }
+  };
+
+  const handleSelectSuggestion = async (description: string, placeId?: string) => {
+    setSearchQuery(description);
+    setShowSuggestions(false);
+    setSearchLoading(true);
+    
+    try {
+      let lat: number | null = null;
+      let lng: number | null = null;
+
+      // Try Place Details first if we have a placeId (most reliable)
+      if (placeId) {
+        const detailUrl = `https://places.googleapis.com/v1/places/${placeId}`;
+        const detailRes = await fetch(detailUrl, {
+          headers: {
+            'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+            'X-Goog-FieldMask': 'location',
+          },
+        });
+        const detailData = await detailRes.json();
+        if (detailData.location) {
+          lat = detailData.location.latitude;
+          lng = detailData.location.longitude;
+        }
+      }
+
+      // Fallback to Geocoding if Place Details didn't work
+      if (!lat || !lng) {
+        const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(description)}&key=${GOOGLE_MAPS_API_KEY}`;
+        const geoRes = await fetch(geoUrl);
+        const geoData = await geoRes.json();
+        if (geoData.status === 'OK' && geoData.results.length > 0) {
+          lat = geoData.results[0].geometry.location.lat;
+          lng = geoData.results[0].geometry.location.lng;
+        }
+      }
+
+      if (lat && lng) {
+        console.log('Jumping to suggestion:', lat, lng, description);
+        setPlaces([]);
+        setActiveRoute(undefined);
+        setSearchedLocation({ name: description, lat, lng });
+        setUserLat(lat);
+        setUserLng(lng);
+        fetchNearbyPlaces(lat, lng);
+      } else {
+        console.warn('Could not resolve location for:', description);
+      }
+    } catch (e) {
+      console.error('Select Suggestion Error:', e);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const searchLocation = async () => {
+    if (!searchQuery.trim()) return;
+    setSearchLoading(true);
+    try {
+      // 1. Try Geocoding first (best for jumping to a city/street)
+      const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(searchQuery)}&key=${GOOGLE_MAPS_API_KEY}`;
+      const geoResponse = await fetch(geoUrl);
+      const geoData = await geoResponse.json();
+
+      if (geoData.status === 'OK' && geoData.results.length > 0) {
+        const { lat, lng } = geoData.results[0].geometry.location;
+        setPlaces([]);
+        setActiveRoute(undefined);
+        setSearchedLocation({ name: searchQuery, lat, lng });
+        setUserLat(lat);
+        setUserLng(lng);
+        fetchNearbyPlaces(lat, lng);
+      } else {
+        // 2. Fallback: Search directly for businesses/clinics using the query
+        // This handles "clinic in Chennai" or "Park Street Pharmacy"
+        const results = await fetchNearbyPlaces(userLat || 13.0827, userLng || 80.2707, radius, searchQuery);
+        
+        // If we found something, jump to the first result
+        if (results && results.length > 0) {
+          setUserLat(results[0].lat);
+          setUserLng(results[0].lng);
+        }
+      }
+    } catch (e) {
+      console.error('Search Error:', e);
+      Alert.alert('Search Error', 'Could not complete search. Please try again.');
+    } finally {
+      setSearchLoading(false);
     }
   };
 
@@ -211,13 +346,16 @@ export default function CareScreen() {
   };
 
   const fetchRoute = async (destLat: number, destLng: number, clinicId: string) => {
-    if (!userLat || !userLng) return;
+    // Use real GPS as origin, not the map center
+    const originLat = gpsLat || userLat;
+    const originLng = gpsLng || userLng;
+    if (!originLat || !originLng) return;
     setIsRoutingId(clinicId);
     
     try {
       // OSRM requires coordinates in [longitude, latitude] format
       const response = await fetch(
-        `https://router.project-osrm.org/route/v1/driving/${userLng},${userLat};${destLng},${destLat}?overview=full&geometries=geojson`
+        `https://router.project-osrm.org/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=geojson`
       );
       const data = await response.json();
       
@@ -262,13 +400,42 @@ export default function CareScreen() {
     title: { ...typography.h3, color: colors.text },
     subtitle: { ...typography.bodySmall, color: colors.textSecondary, marginTop: 4 },
     searchContainer: {
+      ...shadows.sm,
       flexDirection: 'row', alignItems: 'center',
       backgroundColor: colors.cardBackground, borderRadius: borderRadius.md,
       paddingHorizontal: spacing.md, marginBottom: spacing.lg, height: 50,
-      ...shadows.sm,
+      zIndex: 2000, // Higher than map components
+      elevation: 5, // Android shadow and layering
+      overflow: 'visible', // Ensure suggestions aren't clipped
     },
     searchInput: {
       flex: 1, marginLeft: spacing.sm, color: colors.text, ...typography.body,
+    },
+    suggestionContainer: {
+      ...shadows.md,
+      position: 'absolute',
+      top: 52,
+      left: 0,
+      right: 0,
+      backgroundColor: colors.cardBackground,
+      borderRadius: borderRadius.md,
+      zIndex: 3000,
+      elevation: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      maxHeight: 200,
+    },
+    suggestionItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    suggestionText: {
+      ...typography.bodySmall,
+      color: colors.text,
+      marginLeft: spacing.sm,
     },
     section: { marginBottom: spacing.xl },
     sectionTitle: {
@@ -335,8 +502,89 @@ export default function CareScreen() {
       textAlign: 'center', paddingVertical: spacing.xl,
     },
     loadingMap: {
-      height: 280, borderRadius: borderRadius.lg, backgroundColor: colors.cardBackground,
+      height: 320, borderRadius: borderRadius.lg, backgroundColor: colors.cardBackground,
       justifyContent: 'center', alignItems: 'center', marginBottom: spacing.lg,
+    },
+    mapIndicatorContainer: {
+       position: 'absolute',
+       top: '50%',
+       left: '50%',
+       marginLeft: -15,
+       marginTop: -15,
+       zIndex: 10,
+       backgroundColor: 'rgba(255,255,255,0.8)',
+       padding: 8,
+       borderRadius: 20,
+    },
+    mapActions: {
+      position: 'absolute',
+      top: spacing.md,
+      right: spacing.md,
+      gap: spacing.sm,
+    },
+    headerTop: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.xs,
+    },
+    radiusContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.cardBackground,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      overflow: 'hidden',
+      ...shadows.sm,
+    },
+    radiusBtn: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      backgroundColor: colors.background,
+    },
+    radiusValue: {
+      paddingHorizontal: 10,
+      minWidth: 50,
+      alignItems: 'center',
+    },
+    radiusText: {
+      ...typography.caption,
+      fontWeight: '800',
+      color: colors.primary,
+    },
+    mapStyleBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.cardBackground,
+      alignItems: 'center',
+      justifyContent: 'center',
+      ...shadows.sm,
+    },
+    activeStyleBtn: {
+      backgroundColor: colors.primary,
+    },
+    stylePickerExpanded: {
+      position: 'absolute',
+      right: 50,
+      top: 50,
+      backgroundColor: colors.cardBackground,
+      borderRadius: borderRadius.md,
+      padding: 4,
+      flexDirection: 'row',
+      gap: 4,
+      ...shadows.md,
+    },
+    miniStyleBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    activeMiniBtn: {
+      backgroundColor: colors.primary,
     },
   });
 
@@ -345,26 +593,118 @@ export default function CareScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Professional Care</Text>
+          <View style={styles.headerTop}>
+            <Text style={styles.title}>Professional Care</Text>
+            <View style={styles.radiusContainer}>
+              <TouchableOpacity 
+                style={styles.radiusBtn}
+                onPress={() => {
+                  const next = Math.max(1000, radius - 1000);
+                  setRadius(next);
+                  // Debounce radius fetch
+                  if (radiusTimerRef.current) clearTimeout(radiusTimerRef.current);
+                  radiusTimerRef.current = setTimeout(() => {
+                    if (userLat && userLng) fetchNearbyPlaces(userLat, userLng, next);
+                  }, 500);
+                }}
+              >
+                <Icon name="minus" size={14} color={colors.textSecondary} />
+              </TouchableOpacity>
+              
+              <View style={styles.radiusValue}>
+                <Text style={styles.radiusText}>{radius/1000}km</Text>
+              </View>
+
+              <TouchableOpacity 
+                style={styles.radiusBtn}
+                onPress={() => {
+                  const next = Math.min(50000, radius + 1000);
+                  setRadius(next);
+                  // Debounce radius fetch
+                  if (radiusTimerRef.current) clearTimeout(radiusTimerRef.current);
+                  radiusTimerRef.current = setTimeout(() => {
+                    if (userLat && userLng) fetchNearbyPlaces(userLat, userLng, next);
+                  }, 500);
+                }}
+              >
+                <Icon name="plus" size={14} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          </View>
           <Text style={styles.subtitle}>Find nearby clinics and specialists</Text>
         </View>
 
         {/* Search */}
         <View style={styles.searchContainer}>
-          <Icon name="magnify" size={24} color={colors.textLight} />
+          {searchLoading ? (
+            <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 8 }} />
+          ) : (
+            <Icon name="magnify" size={24} color={colors.textLight} />
+          )}
           <TextInput
             style={styles.searchInput}
-            placeholder="Search clinics, hospitals..."
+            placeholder="Search city, street or location..."
             placeholderTextColor={colors.textLight}
             value={searchQuery}
-            onChangeText={setSearchQuery}
+            onChangeText={(text) => {
+              setSearchQuery(text);
+              fetchSuggestions(text);
+            }}
+            onSubmitEditing={searchLocation}
+            onFocus={() => {
+              if (suggestions.length > 0) setShowSuggestions(true);
+            }}
+            returnKeyType="search"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <TouchableOpacity onPress={() => { 
+              setSearchQuery(''); 
+              setSuggestions([]);
+              setShowSuggestions(false);
+              setSearchedLocation(null);
+              requestLocationAndFetch(); 
+            }} style={{ padding: 4 }}>
               <Icon name="close-circle" size={20} color={colors.textLight} />
             </TouchableOpacity>
           )}
-        </View>
+          {/* Dedicated Search Button — works on emulator without keyboard Enter */}
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={searchLocation}
+              style={{
+                backgroundColor: colors.primary,
+                borderRadius: 8,
+                padding: 8,
+                marginLeft: 6,
+              }}
+            >
+              <Icon name="magnify" size={18} color="#FFF" />
+            </TouchableOpacity>
+          )}
+
+            {/* Suggestions Dropdown - Moved inside a wrapping view to prevent clipping */}
+            {showSuggestions && suggestions.length > 0 && (
+              <View style={styles.suggestionContainer}>
+                <ScrollView keyboardShouldPersistTaps="always">
+                  {suggestions.map((item: any, idx: number) => (
+                    <TouchableOpacity
+                      key={item.placePrediction?.placeId || idx}
+                      style={styles.suggestionItem}
+                      onPress={() => handleSelectSuggestion(
+                        item.placePrediction?.text?.text || '',
+                        item.placePrediction?.placeId || undefined
+                      )}
+                    >
+                      <Icon name="map-marker-outline" size={18} color={colors.textLight} />
+                      <Text style={styles.suggestionText} numberOfLines={1}>
+                        {item.placePrediction?.text?.text}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </View>
 
         {/* Map */}
         <View style={styles.mapContainer}>
@@ -372,23 +712,88 @@ export default function CareScreen() {
             <View style={styles.loadingMap}>
               <ActivityIndicator size="large" color={colors.primary} />
               <Text style={[styles.emptyText, { marginTop: spacing.sm }]}>
-                {locationError || 'Loading map...'}
+                {locationError || 'Initializing map...'}
               </Text>
             </View>
           ) : (
-            <LeafletMapView
-              latitude={userLat}
-              longitude={userLng}
-              markers={mapMarkers}
-              route={activeRoute}
-              height={280}
-              borderRadius={borderRadius.lg}
-            />
+            <View style={{ height: 320 }}>
+              <NativeMapView
+                latitude={userLat || 0}
+                longitude={userLng || 0}
+                markers={mapMarkers}
+                route={activeRoute}
+                height={320}
+                borderRadius={borderRadius.lg}
+                mapType={mapType}
+                is3D={is3D}
+                radius={radius}
+              />
+              
+              {/* Background Loader during radius updates */}
+              {placesLoading && (
+                <View style={styles.mapIndicatorContainer}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              )}
+              
+              {/* Map Controls */}
+              <View style={styles.mapActions}>
+                {/* 3D/2D Toggle */}
+                <TouchableOpacity 
+                  style={[styles.mapStyleBtn, is3D && styles.activeStyleBtn]}
+                  onPress={() => setIs3D(!is3D)}
+                >
+                  <Text style={{ 
+                    color: is3D ? colors.white : colors.text, 
+                    fontWeight: '700', 
+                    fontSize: 10 
+                  }}>
+                    {is3D ? '2D' : '3D'}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Layer Toggle Button */}
+                <TouchableOpacity 
+                  style={[styles.mapStyleBtn, showStylePicker && styles.activeStyleBtn]}
+                  onPress={() => setShowStylePicker(!showStylePicker)}
+                >
+                  <Icon 
+                    name="layers-outline" 
+                    size={20} 
+                    color={showStylePicker ? colors.white : colors.text} 
+                  />
+                </TouchableOpacity>
+
+                {/* Floating Style Picker */}
+                {showStylePicker && (
+                  <View style={styles.stylePickerExpanded}>
+                    <TouchableOpacity 
+                      style={[styles.miniStyleBtn, mapType === 'standard' && styles.activeMiniBtn]}
+                      onPress={() => { setMapType('standard'); setShowStylePicker(false); }}
+                    >
+                      <Icon name="map" size={16} color={mapType === 'standard' ? colors.white : colors.text} />
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.miniStyleBtn, mapType === 'satellite' && styles.activeMiniBtn]}
+                      onPress={() => { setMapType('hybrid'); setShowStylePicker(false); }}
+                    >
+                      <Icon name="satellite-variant" size={16} color={mapType === 'hybrid' ? colors.white : colors.text} />
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.miniStyleBtn, mapType === 'terrain' && styles.activeMiniBtn]}
+                      onPress={() => { setMapType('terrain'); setShowStylePicker(false); }}
+                    >
+                      <Icon name="terrain" size={16} color={mapType === 'terrain' ? colors.white : colors.text} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </View>
           )}
         </View>
 
         {/* Telehealth CTA */}
-        <View style={styles.section}>
+        {/* <View style={styles.section}>
           <TouchableOpacity style={styles.helpCard}>
             <View style={styles.helpContent}>
               <Text style={styles.helpTitle}>Skin Telehealth</Text>
@@ -398,7 +803,63 @@ export default function CareScreen() {
               <Icon name="video" size={24} color={colors.white} />
             </View>
           </TouchableOpacity>
-        </View>
+        </View> */}
+
+        {/* Searched Location Card */}
+        {searchedLocation && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Searched Location</Text>
+            <InfoCard style={styles.clinicCard}>
+              <View style={styles.clinicHeader}>
+                <Text style={styles.clinicName}>{searchedLocation.name}</Text>
+                <View style={[styles.distanceBadge, { backgroundColor: isDarkMode ? '#3a1a1a' : '#FFEBEE' }]}>
+                  <Text style={[styles.distanceText, { color: '#E53935' }]}>
+                    <Icon name="map-marker" size={11} color="#E53935" /> Searched
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.typeBadge}>
+                <Text style={styles.typeText}>search result</Text>
+              </View>
+
+              <View style={styles.clinicActions}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.primaryActionBtn]}
+                  onPress={() => {
+                    const origin = gpsLat && gpsLng ? `${gpsLat},${gpsLng}` : '';
+                    const dest = `${searchedLocation.lat},${searchedLocation.lng}`;
+                    const url = Platform.select({
+                      ios: `maps://app?saddr=${origin}&daddr=${dest}`,
+                      android: `google.navigation:q=${dest}`,
+                    });
+                    if (url) Linking.openURL(url).catch(() => {
+                      Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`);
+                    });
+                  }}
+                >
+                  <Icon name="navigation-variant" size={16} color={isDarkMode ? colors.primaryDark : colors.white} />
+                  <Text style={[styles.actionBtnText, styles.primaryActionText]}>Navigate</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, { borderColor: colors.primary }]}
+                  onPress={() => fetchRoute(searchedLocation.lat, searchedLocation.lng, 'searched')}
+                  disabled={isRoutingId !== null}
+                >
+                  {isRoutingId === 'searched' ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <>
+                      <Icon name="map-marker-path" size={16} color={colors.primary} />
+                      <Text style={[styles.actionBtnText, { color: colors.primary }]}>Route</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </InfoCard>
+          </View>
+        )}
 
         {/* Nearby Clinics List */}
         <View style={styles.section}>
@@ -452,19 +913,36 @@ export default function CareScreen() {
                     style={[
                       styles.actionBtn, 
                       styles.primaryActionBtn,
-                      activeRoute && isRoutingId === clinic.id ? { opacity: 0.7 } : {}
                     ]}
+                    onPress={() => {
+                      // Open Google Maps with directions
+                      const origin = gpsLat && gpsLng ? `${gpsLat},${gpsLng}` : '';
+                      const dest = `${clinic.lat},${clinic.lng}`;
+                      const url = Platform.select({
+                        ios: `maps://app?saddr=${origin}&daddr=${dest}`,
+                        android: `google.navigation:q=${dest}`,
+                      });
+                      if (url) Linking.openURL(url).catch(() => {
+                        // Fallback to web Google Maps
+                        Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`);
+                      });
+                    }}
+                  >
+                    <Icon name="navigation-variant" size={16} color={isDarkMode ? colors.primaryDark : colors.white} />
+                    <Text style={[styles.actionBtnText, styles.primaryActionText]}>Navigate</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { borderColor: colors.primary }]}
                     onPress={() => fetchRoute(clinic.lat, clinic.lng, clinic.id)}
                     disabled={isRoutingId !== null}
                   >
                     {isRoutingId === clinic.id ? (
-                      <ActivityIndicator size="small" color={isDarkMode ? colors.primaryDark : colors.white} />
+                      <ActivityIndicator size="small" color={colors.primary} />
                     ) : (
                       <>
-                        <Icon name="navigation-variant" size={16} color={isDarkMode ? colors.primaryDark : colors.white} />
-                        <Text style={[styles.actionBtnText, styles.primaryActionText]}>
-                          {activeRoute && isRoutingId === clinic.id ? 'Route Drawn' : 'Directions'}
-                        </Text>
+                        <Icon name="map-marker-path" size={16} color={colors.primary} />
+                        <Text style={[styles.actionBtnText, { color: colors.primary }]}>Route</Text>
                       </>
                     )}
                   </TouchableOpacity>

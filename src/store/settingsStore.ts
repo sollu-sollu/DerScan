@@ -11,6 +11,7 @@ interface SettingsState {
   toggleDarkMode: (enabled?: boolean) => void;
   setUserName: (name: string) => void;
   setUserAvatar: (avatar: string | null) => void;
+  clearSettings: () => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -25,6 +26,10 @@ export const useSettingsStore = create<SettingsState>()(
         set(state => ({isDarkMode: enabled ?? !state.isDarkMode})),
       setUserName: name => set({userName: name}),
       setUserAvatar: avatar => set({userAvatar: avatar}),
+      clearSettings: () => set({
+        userName: 'Guest User',
+        userAvatar: null,
+      }),
     }),
     {
       name: 'derscan-settings',

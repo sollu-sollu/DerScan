@@ -19,7 +19,70 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { useProgressStore } from '../../store/progressStore';
 import { getLatestScan } from '../../services/firestore';
 import type { AnalysisResult, RoutineItem, LifestyleItem } from '../../services/api';
-import { scheduleRoutineReminders, cancelAllReminders } from '../../services/notificationService';
+import { scheduleRoutineReminders, cancelAllReminders, areRemindersEnabled } from '../../services/notificationService';
+import { safeIcon } from '../../utils/safeIcon';
+
+// --- Lightweight TimePicker Component ---
+function TimePickerModal({
+  visible,
+  initialTime,
+  onClose,
+  onSave
+}: {
+  visible: boolean;
+  initialTime: string;
+  onClose: () => void;
+  onSave: (time: string) => void;
+}) {
+  const { colors, spacing, borderRadius, typography } = useTheme();
+  
+  // Parse "8:00 AM" initial state safely
+  const match = initialTime.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  const [hours, setHours] = useState(match ? match[1] : '8');
+  const [minutes, setMinutes] = useState(match ? match[2] : '00');
+  const [period, setPeriod] = useState(match?.[3]?.toUpperCase() || 'AM');
+
+  // Helpers to cycle values safely without heavy scrolling logic
+  const incHour = () => setHours(prev => { const n = parseInt(prev)+1; return n > 12 ? '1' : n.toString(); });
+  const decHour = () => setHours(prev => { const n = parseInt(prev)-1; return n < 1 ? '12' : n.toString(); });
+  const incMin = () => setMinutes(prev => { const n = parseInt(prev)+15; return n >= 60 ? '00' : n.toString().padStart(2, '0'); });
+  const decMin = () => setMinutes(prev => { const n = parseInt(prev)-15; return n < 0 ? '45' : n.toString().padStart(2, '0'); });
+  const togglePeriod = () => setPeriod(prev => prev === 'AM' ? 'PM' : 'AM');
+
+  const handleSave = () => {
+    onSave(`${hours}:${minutes} ${period}`);
+    onClose();
+  };
+
+  return (
+    <CustomModal visible={visible} onClose={onClose} title="Set Reminder Time">
+      <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginVertical: spacing.lg }}>
+        {/* Hours */}
+        <View style={{ alignItems: 'center' }}>
+          <TouchableOpacity onPress={incHour} style={{ padding: 10 }}><Icon name="chevron-up" size={32} color={colors.textLight} /></TouchableOpacity>
+          <Text style={{ fontSize: 36, fontWeight: '700', color: colors.text, width: 60, textAlign: 'center' }}>{hours}</Text>
+          <TouchableOpacity onPress={decHour} style={{ padding: 10 }}><Icon name="chevron-down" size={32} color={colors.textLight} /></TouchableOpacity>
+        </View>
+        <Text style={{ fontSize: 36, fontWeight: '700', color: colors.textLight, marginHorizontal: 4 }}>:</Text>
+        {/* Minutes */}
+        <View style={{ alignItems: 'center' }}>
+          <TouchableOpacity onPress={incMin} style={{ padding: 10 }}><Icon name="chevron-up" size={32} color={colors.textLight} /></TouchableOpacity>
+          <Text style={{ fontSize: 36, fontWeight: '700', color: colors.text, width: 60, textAlign: 'center' }}>{minutes}</Text>
+          <TouchableOpacity onPress={decMin} style={{ padding: 10 }}><Icon name="chevron-down" size={32} color={colors.textLight} /></TouchableOpacity>
+        </View>
+        <View style={{ width: spacing.md }} />
+        {/* AM/PM */}
+        <View style={{ alignItems: 'center' }}>
+          <TouchableOpacity onPress={togglePeriod} style={{ padding: 10 }}><Icon name="chevron-up" size={24} color={colors.textLight} /></TouchableOpacity>
+          <Text style={{ fontSize: 24, fontWeight: '600', color: colors.primary }}>{period}</Text>
+          <TouchableOpacity onPress={togglePeriod} style={{ padding: 10 }}><Icon name="chevron-down" size={24} color={colors.textLight} /></TouchableOpacity>
+        </View>
+      </View>
+      <PrimaryButton title="Save Time" onPress={handleSave} />
+    </CustomModal>
+  );
+}
+// ----------------------------------------
 
 export default function PlanScreen() {
   const navigation = useNavigation();
@@ -31,6 +94,11 @@ export default function PlanScreen() {
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [isRealData, setIsRealData] = useState(false);
   const [remindersOn, setRemindersOn] = useState(false);
+  
+  // Custom Time Picker State
+  const [timePickerVisible, setTimePickerVisible] = useState(false);
+  const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+
   const [notifyModalVisible, setNotifyModalVisible] = useState(false);
   const [notifyModalContent, setNotifyModalContent] = useState<{
     title: string;
@@ -41,6 +109,8 @@ export default function PlanScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Initialize states properly without causing infinite focus loops
+      setRemindersOn(areRemindersEnabled());
       loadLatestScan();
     }, [activeSeriesId])
   );
@@ -62,17 +132,27 @@ export default function PlanScreen() {
         setScanData(null);
       }
     } catch (error) {
-      console.error('Failed to load scan data:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const toggleRoutine = (index: string) => {
-    setCheckedItems(prev => ({
-      ...prev,
-      [index]: !prev[index],
-    }));
+  const toggleRoutine = useCallback((index: string) => {
+    setCheckedItems(prev => ({ ...prev, [index]: !prev[index] }));
+  }, []);
+
+  const handleTimeChange = (newTime: string) => {
+    if (editingItemIndex === null || !scanData || !scanData.daily_routine) return;
+
+    // Mutate the local scanData state to show the new time
+    const updatedRoutine = [...scanData.daily_routine];
+    updatedRoutine[editingItemIndex].time = newTime;
+    setScanData({ ...scanData, daily_routine: updatedRoutine });
+    
+    // If reminders are currently ON, silently resync them with the new time
+    if (remindersOn) {
+      scheduleRoutineReminders(updatedRoutine);
+    }
   };
 
   const routine = scanData?.daily_routine ?? [];
@@ -286,7 +366,7 @@ export default function PlanScreen() {
         <View style={styles.header}>
           <View style={{ width: 24 }} />
           <Text style={styles.title}>Treatment Plan</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => {}}>
             <Icon name="dots-vertical" size={24} color={colors.text} />
           </TouchableOpacity>
         </View>
@@ -373,35 +453,39 @@ export default function PlanScreen() {
                   }
                 }}
               >
-                <Icon
-                  name={remindersOn ? 'bell-ring' : 'bell-outline'}
-                  size={14}
-                  color={remindersOn ? colors.success : colors.textLight}
-                />
-                <Text style={{
-                  fontSize: 10, fontWeight: '600', marginLeft: 4,
-                  color: remindersOn ? colors.success : colors.textLight,
-                }}>
-                  {remindersOn ? 'ON' : 'Remind'}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          <InfoCard>
-            {routine.map((item: RoutineItem, index: number) => (
-              <ChecklistItem
-                key={String(index)}
-                title={item.title}
-                subtitle={item.subtitle}
-                time={item.time}
-                checked={checkedItems[String(index)] ?? false}
-                onToggle={() => toggleRoutine(String(index))}
-                icon={item.icon}
-                iconColor={checkedItems[String(index)] ? colors.success : colors.primary}
-              />
-            ))}
-          </InfoCard>
-        </View>
+            <Icon
+              name={remindersOn ? 'bell-ring' : 'bell-outline'}
+              size={14}
+              color={remindersOn ? colors.success : colors.textLight}
+            />
+            <Text style={{
+              fontSize: 10, fontWeight: '600', marginLeft: 4,
+              color: remindersOn ? colors.success : colors.textLight,
+            }}>
+              {remindersOn ? 'ON' : 'Remind'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <InfoCard>
+        {routine.map((item: RoutineItem, index: number) => (
+          <ChecklistItem
+            key={String(index)}
+            title={item.title}
+            subtitle={item.subtitle}
+            time={item.time}
+            checked={checkedItems[String(index)] ?? false}
+            onToggle={() => toggleRoutine(String(index))}
+            onTimePress={() => {
+              setEditingItemIndex(index);
+              setTimePickerVisible(true);
+            }}
+            icon={safeIcon(item.icon, 'medical-bag')}
+            iconColor={checkedItems[String(index)] ? colors.success : colors.primary}
+          />
+        ))}
+      </InfoCard>
+    </View>
 
         {/* Lifestyle Adjustments */}
         {lifestyle.length > 0 && (
@@ -411,7 +495,7 @@ export default function PlanScreen() {
               {lifestyle.map((item: LifestyleItem, index: number) => (
                 <View key={index} style={styles.lifestyleItem}>
                   <View style={styles.lifestyleIconBg}>
-                    <Icon name={item.icon || 'star'} size={24} color={colors.primary} />
+                    <Icon name={safeIcon(item.icon, 'star')} size={24} color={colors.primary} />
                   </View>
                   <Text style={styles.lifestyleTitle}>{item.title}</Text>
                   <Text style={styles.lifestyleSubtitle}>{item.subtitle}</Text>
@@ -431,6 +515,19 @@ export default function PlanScreen() {
           subtitle={notifyModalContent.subtitle}
           icon={notifyModalContent.icon}
           iconColor={notifyModalContent.iconColor}
+        />
+      )}
+
+      {/* Time Picker Modal */}
+      {editingItemIndex !== null && scanData?.daily_routine && (
+        <TimePickerModal
+          visible={timePickerVisible}
+          onClose={() => {
+            setTimePickerVisible(false);
+            setEditingItemIndex(null);
+          }}
+          initialTime={scanData.daily_routine[editingItemIndex].time || '8:00 AM'}
+          onSave={handleTimeChange}
         />
       )}
     </SafeAreaView>

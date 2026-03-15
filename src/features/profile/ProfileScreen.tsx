@@ -11,7 +11,7 @@ import {
   Switch,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { launchImageLibrary } from 'react-native-image-picker';
+import ImagePicker from 'react-native-image-crop-picker';
 import { useTheme } from '../../theme';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useAuthStore } from '../../store/authStore';
@@ -26,7 +26,8 @@ const ProfileScreen = () => {
     apiUrl, 
     setUserAvatar, 
     setApiUrl, 
-    toggleDarkMode 
+    toggleDarkMode,
+    clearSettings 
   } = useSettingsStore();
   const { user, reloadUser } = useAuthStore();
 
@@ -45,13 +46,17 @@ const ProfileScreen = () => {
 
   const handlePickImage = async () => {
     try {
-      const result = await launchImageLibrary({
+      const image = await ImagePicker.openPicker({
+        width: 400,
+        height: 400,
+        cropping: true,
+        cropperCircleOverlay: true,
         mediaType: 'photo',
-        quality: 0.7,
+        compressImageQuality: 0.8,
       });
 
-      if (result.assets && result.assets.length > 0 && result.assets[0].uri) {
-        const localUri = result.assets[0].uri;
+      if (image && image.path) {
+        const localUri = image.path;
         
         // Show immediate local feedback
         setUserAvatar(localUri);
@@ -116,6 +121,7 @@ const ProfileScreen = () => {
           variant: 'destructive',
           onPress: () => {
             setModalVisible(false);
+            clearSettings();
             auth().signOut();
           }
         }
