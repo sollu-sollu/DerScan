@@ -79,7 +79,33 @@ export default function ResultsScreen() {
   }, [conditionName]);
 
   const handleShareReport = async () => {
-    // ... same as before ...
+    if (!analysisData) return;
+    
+    setIsGeneratingPdf(true);
+    try {
+      const userName = user?.displayName || 'Patient';
+      
+      const fullData: AnalysisResult = {
+        ...analysisData,
+        image_uri: scannedImageUri,
+        scan_id: scanId
+      };
+
+      await generateAndSharePDF(fullData, userName);
+    } catch (error: any) {
+      let errorMsg = error?.message || 'Unknown error';
+      if (errorMsg.length > 100) errorMsg = errorMsg.substring(0, 100) + '...';
+      
+      setNotifyModalContent({
+        title: 'Report Error',
+        subtitle: `Failed: ${errorMsg}. Check permissions/apps.`,
+        icon: 'file-document-remove-outline',
+        iconColor: colors.error,
+      });
+      setNotifyModalVisible(true);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   const handleSaveResult = async (type: 'current' | 'new' | 'temp') => {

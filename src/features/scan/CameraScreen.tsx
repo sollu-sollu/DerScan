@@ -38,7 +38,9 @@ export default function CameraScreen() {
   const { colors, isDarkMode } = useTheme();
   
   // Camera State
-  const device = useCameraDevice('back');
+  const [cameraPosition, setCameraPosition] = useState<'back' | 'front'>('back');
+  const [flashMode, setFlashMode] = useState<'off' | 'on' | 'auto'>('auto');
+  const device = useCameraDevice(cameraPosition);
   const { hasPermission, requestPermission } = useCameraPermission();
   const camera = React.useRef<Camera>(null);
 
@@ -114,7 +116,7 @@ export default function CameraScreen() {
       
       // We don't change isActive yet to ensure camera is ready
       const photo: PhotoFile = await camera.current.takePhoto({
-        flash: 'auto',
+        flash: flashMode,
         enableShutterSound: true,
       });
       
@@ -245,6 +247,8 @@ export default function CameraScreen() {
       justifyContent: 'center',
     },
     autoMode: {
+      flexDirection: 'row',
+      alignItems: 'center',
       backgroundColor: 'rgba(255,255,255,0.2)',
       paddingHorizontal: 16,
       paddingVertical: 8,
@@ -399,10 +403,26 @@ export default function CameraScreen() {
             >
               <Icon name="arrow-left" size={24} color={colors.white} />
             </TouchableOpacity>
-            <View style={styles.autoMode}>
-              <Text style={styles.autoModeText}>Auto ▼</Text>
-            </View>
-            <TouchableOpacity style={styles.controlButton}>
+            
+            <TouchableOpacity 
+              style={styles.autoMode}
+              onPress={() => setFlashMode(f => f === 'auto' ? 'on' : f === 'on' ? 'off' : 'auto')}
+            >
+              <Icon 
+                name={flashMode === 'off' ? 'flash-off' : flashMode === 'auto' ? 'flash-auto' : 'flash'} 
+                size={18} 
+                color={colors.white} 
+                style={{ marginRight: 4 }} 
+              />
+              <Text style={styles.autoModeText}>
+                {flashMode === 'auto' ? 'Auto' : flashMode === 'on' ? 'On' : 'Off'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.controlButton}
+              onPress={() => setCameraPosition(p => p === 'back' ? 'front' : 'back')}
+            >
               <Icon name="camera-flip" size={24} color={colors.white} />
             </TouchableOpacity>
           </View>

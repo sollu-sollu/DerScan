@@ -1,4 +1,4 @@
-const RNHTMLtoPDF = require('react-native-html-to-pdf');
+import { generatePDF } from 'react-native-html-to-pdf';
 import Share from 'react-native-share';
 import { AnalysisResult } from './api';
 import { Platform } from 'react-native';
@@ -14,18 +14,21 @@ export async function generateAndSharePDF(result: AnalysisResult, userName: stri
     const options = {
       html: htmlContent,
       fileName: `DerScan_Report_${result.scan_id}`,
-      directory: 'Documents',
-      base64: true,
+      directory: Platform.OS === 'android' ? 'Cache' : 'Documents',
     };
 
-    const file = await RNHTMLtoPDF.convert(options);
+    const file = await generatePDF(options);
     
     if (file.filePath) {
+      // Format the path for Sharing. On Android, the path needs a 'file://' prefix
+      const filePath = Platform.OS === 'android' ? `file://${file.filePath}` : file.filePath;
+
       await Share.open({
-        url: Platform.OS === 'android' ? `file://${file.filePath}` : file.filePath,
+        url: filePath,
         type: 'application/pdf',
         title: 'DerScan Clinical Report',
         subject: `Skin Analysis Report - ${result.condition_name}`,
+        failOnCancel: false,
       });
     }
   } catch (error) {

@@ -30,6 +30,16 @@
         </intent-filter>
       </activity>
 
+      <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.rnshare.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/share_download_paths" />
+      </provider>
+
       <meta-data
         android:name="com.google.android.geo.API_KEY"
         android:value="AIzaSyDdyZqQW6Bs2YH3o2sH-yK97c9gQx_6Jow"/>
